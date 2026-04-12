@@ -1,0 +1,320 @@
+import io
+import logging
+import re
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Literal
+
+import fitz
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from pypdf import PdfReader
+
+logger = logging.getLogger("rag_qc")
+
+
+@contextmanager
+def _quiet_pypdf_logs():
+    loggers = [logging.getLogger(name) for name in ("pypdf", "pypdf._reader", "pypdf.generic")]
+    previous = [(lg, lg.level, lg.propagate) for lg in loggers]
+    try:
+        for lg in loggers:
+            lg.setLevel(logging.ERROR)  # solo errores graves durante la extracción
+            lg.propagate = False  # no subir ruido al logger raíz
+        yield
+    finally:
+        for lg, level, propagate in previous:
+            lg.setLevel(level)  # restaurar nivel anterior
+            lg.propagate = propagate
+
+
+def _looks_like_markdown_table_row(line: str) -> bool:
+    """Evita que la limpieza de PDF borre filas de tablas en Markdown (| celdas |)."""
+    s = line.strip()
+    if not s.startswith("|"):
+        return False
+    if "---" in s:
+        return True
+    if not s.endswith("|"):
+        return False
+    cells = [c.strip() for c in s.split("|")]
+    cells = [c for c in cells if c != ""]
+    if not cells:
+        return False
+    return True
+
+
+def _escape_md_table_cell(text: str) -> str:
+    return text.replace("|", "\\|").replace("\n", " ").strip()
+
+
+def _matrix_to_markdown_table(rows: list | None) -> str:
+    """Convierte matriz de celdas (p. ej. Table.extract()) a tabla GFM."""
+    if not rows:
+        return ""
+    norm: list[list[str]] = []
+    for row in rows:
+        if row is None:
+            continue
+        norm.append(["" if c is None else str(c) for c in row])
+    if not norm:
+        return ""
+    ncols = max(len(r) for r in norm)
+    esc = [[_escape_md_table_cell(c) for c in (r + [""] * (ncols - len(r)))] for r in norm]
+    sep = "| " + " | ".join(["---"] * ncols) + " |"
+    out_lines = ["| " + " | ".join(esc[0]) + " |", sep]
+    out_lines.extend("| " + " | ".join(r) + " |" for r in esc[1:])
+    return "\n".join(out_lines)
+
+
+def _page_tables_markdown(page: fitz.Page, page_no: int) -> str:
+    """Detecta tablas con PyMuPDF y las serializa en Markdown legible para el LLM."""
+    try:
+        tf = page.find_tables()
+    except Exception as exc:
+        logger.debug("find_tables omitido en página %s: %s", page_no, exc)
+        return ""
+    if not tf.tables:
+        return ""
+    ordered = sorted(tf.tables, key=lambda t: (round(t.bbox[1], 2), round(t.bbox[0], 2)))
+    chunks: list[str] = []
+    for i, tab in enumerate(ordered, start=1):
+        md = ""
+        try:
+            md = (tab.to_markdown(clean=True) or "").strip()
+        except Exception:
+            try:
+                md = (tab.to_markdown() or "").strip()
+            except Exception:
+                md = ""
+        if not md:
+            try:
+                rows = tab.extract()
+                md = _matrix_to_markdown_table(rows).strip()
+            except Exception:
+                md = ""
+        if md:
+            chunks.append(f"### Tabla {i} (página {page_no})\n\n{md}")
+    if not chunks:
+        return ""
+    return "\n\n".join(chunks)
+
+
+def clean_text(raw: str) -> str:
+    text = raw.replace("\r\n", "\n").replace("\r", "\n")  # unificar saltos de línea
+    text = re.sub(r"[ \t]+\n", "\n", text)  # quitar espacios al final de cada línea
+    text = re.sub(r"\n{3,}", "\n\n", text)  # no dejar más de un párrafo vacío seguido
+    return text.strip()
+
+
+def merge_short_split_fragments(
+    parts: list[str],
+    *,
+    min_chars: int,
+    hard_max: int,
+) -> list[str]:
+    chunks = [p.strip() for p in parts if p and p.strip()]  # descartar trozos vacíos
+    if not chunks:
+        return []
+    out: list[str] = []
+    buf = chunks[0]
+    for nxt in chunks[1:]:
+        if len(buf) >= min_chars:
+            out.append(buf)
+            buf = nxt
+            continue
+        sep = "\n\n" if buf and nxt else ""
+        candidate = buf + sep + nxt
+        if len(candidate) <= hard_max:
+            buf = candidate
+        else:
+            out.append(buf)
+            buf = nxt
+    if out and len(buf) < min_chars:
+        sep = "\n\n" if out[-1] and buf else ""
+        combined = out[-1] + sep + buf
+        if len(combined) <= hard_max:
+            out[-1] = combined
+        else:
+            out.append(buf)
+    else:
+        out.append(buf)
+    return out
+
+
+def _iter_markdown_fenced_segments(text: str) -> list[tuple[Literal["prose", "fence"], str]]:
+    segments: list[tuple[Literal["prose", "fence"], str]] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        j = text.find("```", i)  # buscar inicio de bloque de código markdown
+        if j == -1:
+            if i < n:
+                segments.append(("prose", text[i:]))  # resto del texto es prosa
+            break
+        if j > i:
+            segments.append(("prose", text[i:j]))  # texto antes del fence
+        line_end = text.find("\n", j + 3)
+        if line_end == -1:
+            segments.append(("prose", text[j:]))  # ``` sin cierre: tratar como prosa
+            break
+        k = text.find("```", line_end + 1)  # cierre del bloque ```
+        if k == -1:
+            segments.append(("prose", text[j:]))
+            break
+        segments.append(("fence", text[j : k + 3]))  # bloque completo ```…```
+        i = k + 3
+    return segments
+
+
+def chunk_text_for_ingest(
+    text: str,
+    prose_splitter: RecursiveCharacterTextSplitter,
+    *,
+    chunk_size: int,
+    chunk_overlap: int,
+    merge_min_chars: int,
+    merge_hard_max: int,
+) -> list[str]:
+    code_splitter = RecursiveCharacterTextSplitter(  # trocear código dentro de fences
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        length_function=len,
+        separators=["\n\n", "\n", " ", ""],
+    )
+    raw: list[str] = []
+    for kind, body in _iter_markdown_fenced_segments(text):  # separar prosa vs ```código```
+        b = body.strip() if kind == "fence" else body
+        if not (b if kind == "fence" else b.strip()):
+            continue
+        if kind == "fence":
+            if len(b) <= merge_hard_max:
+                raw.append(b)  # bloque de código cabe en un solo chunk
+            else:
+                raw.extend(code_splitter.split_text(b))  # partir el código en varios trozos
+        else:
+            raw.extend(prose_splitter.split_text(b))  # partir prosa con separadores del PDF/libro
+    return merge_short_split_fragments(  # juntar títulos sueltos con el párrafo siguiente
+        raw,
+        min_chars=merge_min_chars,
+        hard_max=max(merge_hard_max, merge_min_chars),
+    )
+
+
+def strip_pdf_glyph_tokens(text: str) -> str:
+    if not text:
+        return text
+    s = re.sub(r"(?:/g\d+)+", " ", text, flags=re.IGNORECASE)  # basura tipo /g123 del stream PDF
+    s = re.sub(r" {2,}", " ", s)  # compactar espacios tras limpiar
+    return s
+
+
+def sanitize_chunk_text(text: str) -> str:
+    if not text or not text.strip():
+        return text
+    normalized = _normalize_pdf_stream_junk(text)  # quitar artefactos de operadores PDF
+    thinned = _reduce_pdf_drawing_artifacts(normalized)  # tirar líneas tipo tablas vectoriales
+    final = clean_text(thinned)  # normalizar espacios y párrafos
+    return final if final.strip() else text
+
+
+def _normalize_pdf_stream_junk(text: str) -> str:
+    out_lines: list[str] = []
+    for line in text.split("\n"):
+        if _looks_like_markdown_table_row(line):
+            out_lines.append(line.rstrip())
+            continue
+        s = line
+        s = re.sub(r"(?:/g\d+)+", " ", s, flags=re.IGNORECASE)  # tokens /gN por línea
+        s = re.sub(r"(?:[ \t]*\|[ \t]*){2,}", " ", s)  # secuencias de | típicas de dibujo PDF
+        s = re.sub(r" {3,}", " ", s)  # espacios múltiples
+        out_lines.append(s.rstrip())
+    return "\n".join(out_lines)
+
+
+def _reduce_pdf_drawing_artifacts(text: str) -> str:
+    out: list[str] = []
+    for line in text.split("\n"):
+        if _looks_like_markdown_table_row(line):
+            out.append(line)
+            continue
+        s = line.strip()
+        if not s:
+            out.append("")  # conservar línea en blanco para estructura
+            continue
+        pipes = s.count("|")
+        letters = sum(1 for c in s if c.isalpha())
+        digits = sum(1 for c in s if c.isdigit())
+        if pipes >= 6 and letters < max(4, pipes // 3):
+            continue  # línea dominada por |: probable figura vectorial
+        if pipes >= 2 and letters == 0 and digits == 0:
+            continue  # solo separadores, sin contenido legible
+        stripped_non_alpha = re.sub(r"[^a-zA-Z]", "", s)
+        if len(stripped_non_alpha) <= 2 and letters <= 2 and len(s) <= 20:
+            non_digit_non_space = re.sub(r"[\d\s\.\,\-\−\+]", "", s)
+            if len(non_digit_non_space) <= 2:
+                continue  # ruido muy corto (símbolos sueltos)
+        out.append(line)
+    joined = "\n".join(out)
+    joined = re.sub(r"\n{4,}", "\n\n\n", joined)  # limitar párrafos vacíos consecutivos
+    return joined.strip()
+
+
+def _pdf_text_pymupdf(data: bytes) -> str:
+    doc = fitz.open(stream=data, filetype="pdf")  # abrir PDF desde memoria
+    try:
+        parts: list[str] = []
+        for i in range(doc.page_count):
+            page = doc.load_page(i)  # página i-ésima
+            page_no = i + 1
+            try:
+                txt = page.get_text(sort=True)  # orden de lectura humano cuando existe API
+            except (TypeError, ValueError):
+                txt = page.get_text()  # fallback si sort=True no está soportado
+            body = (txt or "").strip()
+            tables_md = _page_tables_markdown(page, page_no)
+            if tables_md:
+                block = (
+                    f"{body}\n\n---\n\n## Tablas (extracción estructurada, Markdown)\n\n{tables_md}"
+                    if body
+                    else f"## Tablas (extracción estructurada, Markdown)\n\n{tables_md}"
+                )
+                parts.append(block)
+            else:
+                parts.append(body)
+        return "\n\n".join(parts)  # separar páginas con doble salto
+    finally:
+        doc.close()  # liberar recursos del documento
+
+
+def _pdf_text_pypdf(data: bytes) -> str:
+    with _quiet_pypdf_logs():  # evitar inundar logs con avisos de pypdf
+        reader = PdfReader(io.BytesIO(data), strict=False)  # lector tolerante a PDFs raros
+        parts: list[str] = []
+        for page in reader.pages:
+            parts.append(page.extract_text() or "")  # texto plano por página
+    return "\n\n".join(parts)
+
+
+def load_document_bytes(filename: str, data: bytes) -> str:
+    suffix = Path(filename).suffix.lower()  # extensión para elegir extractor
+    if suffix in {".txt", ".md", ".markdown"}:
+        return clean_text(data.decode("utf-8", errors="replace"))  # UTF-8; bytes inválidos → carácter sustituto
+    if suffix == ".pdf":
+        raw = ""
+        try:
+            raw = _pdf_text_pymupdf(data)  # extracción preferida: mejor orden de lectura
+        except Exception as e:
+            logger.warning("PyMuPDF no disponible o falló (%s); usando pypdf.", e)
+        if len(raw.strip()) < 200:
+            try:
+                raw = _pdf_text_pypdf(data)  # poco texto: reintentar con pypdf por si acaso
+            except Exception as e:
+                raise ValueError(f"No se pudo leer el PDF: {e}") from e
+        elif not raw.strip():
+            raw = _pdf_text_pypdf(data)  # PyMuPDF devolvió vacío: probar respaldo
+        normalized = _normalize_pdf_stream_junk(raw)  # limpiar operadores residuales
+        cleaned = clean_text(_reduce_pdf_drawing_artifacts(normalized))  # quitar basura visual y normalizar
+        if not cleaned.strip():
+            raise ValueError("El PDF no devolvió texto legible tras la extracción.")
+        return cleaned
+    raise ValueError(f"Formato no soportado: {suffix}. Use .txt, .md o .pdf.")

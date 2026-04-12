@@ -1,0 +1,90 @@
+from pathlib import Path
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+
+class Settings(BaseSettings):
+    """Configuración desde variables de entorno (.env bajo backend/)."""
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    openai_api_key: str = ""
+    openai_chat_model: str = "gpt-4o-mini"
+    openai_chat_temperature: float = Field(default=0.1, ge=0.0, le=2.0)
+    # Límite de tokens de salida del chat RAG (respuestas largas / prompts detallados).
+    openai_chat_max_output_tokens: int = Field(default=4096, ge=256, le=128_000)
+    openai_embedding_model: str = "text-embedding-3-small"
+    openai_api_base: str | None = None
+    chroma_persist_directory: str = "./chroma_db"
+    chroma_collection_name: str = "internal_knowledge"
+    chroma_ingest_batch_size: int = 128
+    chunk_size: int = 1280
+    chunk_overlap: int = 256
+    chunk_min_chars: int = 400
+    chunk_merge_hard_max: int = 0
+    top_k: int = 6
+    use_mmr: bool = True
+    mmr_fetch_k: int = 80
+    mmr_lambda: float = 0.91
+    retrieve_max_l2_distance: float = 1.3
+    retrieve_relevance_margin: float = 0.10
+    retrieve_elbow_l2_gap: float = 0.0
+    # Si es False, no se llama al LLM antes de recuperar (siempre perfil "normal"; ahorra coste/latencia).
+    llm_retrieval_profile: bool = True
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    max_upload_bytes: int = 200 * 1024 * 1024
+
+    # Evolution API (WhatsApp): webhook POST /webhooks/evolution. Pon false para apagar por completo.
+    evolution_enabled: bool = True
+    evolution_api_base_url: str = "http://127.0.0.1:8080"
+    evolution_api_key: str = ""
+    evolution_verify_webhook_apikey: bool = True
+    evolution_reply_in_groups: bool = False
+    # true = loguea el JSON completo del webhook (truncado) en cada POST; útil para depurar.
+    evolution_webhook_log_body: bool = False
+    # Solo responder chats 1:1 cuyo JID coincida (dígitos E.164 sin +, separados por coma). Vacío = todos.
+    evolution_allowed_sender_numbers: str = ""
+    # Mientras se ejecuta RAG+LLM, llamar a Evolution sendPresence (composing). Requiere ejecutar el RAG en un thread.
+    evolution_typing_indicator: bool = True
+    # Duración de cada pulso composing (ms). Evolution ≤20 s evita cortes “paused” entre pulsos; se renueva en bucle hasta terminar.
+    evolution_typing_pulse_ms: int = Field(default=20_000, ge=3_000, le=20_000)
+
+    @field_validator("evolution_api_key", mode="after")
+    @classmethod
+    def strip_evolution_api_key(cls, v: str) -> str:
+        """Quita espacios y BOM (UTF-8) que suelen colarse al copiar desde .env."""
+        return v.strip().strip("\ufeff").strip()
+
+    @field_validator("evolution_allowed_sender_numbers", mode="after")
+    @classmethod
+    def strip_evolution_allowed_senders(cls, v: str) -> str:
+        return v.strip().strip("\ufeff").strip()
+
+    @field_validator("openai_chat_model", "openai_embedding_model", mode="after")
+    @classmethod
+    def normalize_model_ids(cls, v: str) -> str:
+        """Quita espacios/comillas y corrige typos frecuentes (p. ej. gpt-5o-mini → gpt-4o-mini)."""
+        s = v.strip().strip("'\"")
+        aliases = {
+            "gpt-5o-mini": "gpt-4o-mini",
+            "gpt5o-mini": "gpt-4o-mini",
+            "gpt-50-mini": "gpt-4o-mini",
+        }
+        return aliases.get(s.lower(), s)
+
+    @field_validator("chroma_persist_directory", mode="after")
+    @classmethod
+    def chroma_persist_absolute(cls, v: str) -> str:
+        """Resuelve rutas relativas respecto al directorio backend/."""
+        p = Path(v).expanduser()
+        if not p.is_absolute():
+            p = (_BACKEND_DIR / p).resolve()
+        else:
+            p = p.resolve()
+        return str(p)
