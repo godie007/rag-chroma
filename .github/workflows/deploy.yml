@@ -31,13 +31,13 @@ jobs:
           rm -rf chroma_db
           cp .env.example .env
           pip3 install --upgrade pip setuptools wheel
-          pip3 install --no-cache-dir uvicorn fastapi pydantic pydantic-settings python-dotenv python-multipart
-          pip3 install --no-cache-dir httpx requests charset-normalizer certifi idna urllib3 sniffio
-          pip3 install --no-cache-dir numpy
-          pip3 install --no-cache-dir openai tiktoken
-          pip3 install --no-cache-dir langchain-core langchain-text-splitters langchain-openai
-          pip3 install --no-cache-dir pypdf PyMuPDF
-          pip3 install --no-cache-dir chromadb langchain-chroma langchain-community || true
+          pip3 install --no-cache-dir uvicorn fastapi pydantic pydantic-settings python-dotenv python-multipart || true
+          pip3 install --no-cache-dir httpx requests charset-normalizer certifi idna urllib3 sniffio || true
+          pip3 install --no-cache-dir numpy || true
+          pip3 install --no-cache-dir openai==1.12.0 tiktoken || true
+          pip3 install --no-cache-dir langchain-core langchain-text-splitters langchain-openai || true
+          pip3 install --no-cache-dir pypdf PyMuPDF || true
+          pip3 install --no-cache-dir --no-deps chromadb langchain-chroma langchain-community || true
           sudo cp rag-backend.service /etc/systemd/system/
           sudo systemctl daemon-reload || true
           sudo systemctl enable rag-backend || true
