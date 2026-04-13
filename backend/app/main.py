@@ -158,6 +158,21 @@ class StatsResponse(BaseModel):
     collection: str
 
 
+class IndexedSourcesResponse(BaseModel):
+    sources: list[str]
+
+
+class DeleteIndexedSourceBody(BaseModel):
+    source: str = Field(..., min_length=1, max_length=4096)
+
+
+class DeleteIndexedSourceResponse(BaseModel):
+    source: str
+    chunks_removed: int
+    chunk_count: int
+    ready: bool = True
+
+
 class ConfigPublic(BaseModel):
     openai_chat_temperature: float
     openai_chat_max_output_tokens: int
@@ -195,6 +210,13 @@ def stats():
         chunk_count=_rag.collection_chunk_count(),
         collection=s.chroma_collection_name,
     )
+
+
+@app.get("/stats/sources", response_model=IndexedSourcesResponse)
+def stats_indexed_sources():
+    if _rag is None:
+        return IndexedSourcesResponse(sources=[])
+    return IndexedSourcesResponse(sources=_rag.list_indexed_sources())
 
 
 @app.get("/config", response_model=ConfigPublic)
@@ -267,6 +289,19 @@ async def ingest(files: list[UploadFile] = File(...)):
         files_processed=processed,
         chunks_added=total_chunks,
         messages=messages,
+    )
+
+
+@app.post("/ingest/delete-source", response_model=DeleteIndexedSourceResponse)
+def ingest_delete_source(body: DeleteIndexedSourceBody):
+    """Elimina todos los fragmentos indexados para una fuente (nombre de archivo u origen en metadato ``source``)."""
+    rag = require_rag()
+    removed = rag.delete_indexed_source(body.source)
+    return DeleteIndexedSourceResponse(
+        source=body.source.strip(),
+        chunks_removed=removed,
+        chunk_count=rag.collection_chunk_count(),
+        ready=True,
     )
 
 

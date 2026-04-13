@@ -58,6 +58,24 @@ function App() {
     })()
   }, [])
 
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | undefined
+    const schedule = () => {
+      window.clearTimeout(t)
+      t = window.setTimeout(() => void refreshStats(), 150)
+    }
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') schedule()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', schedule)
+    return () => {
+      window.clearTimeout(t)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', schedule)
+    }
+  }, [refreshStats])
+
   return (
     <AppShell view={view} setView={setView} stats={stats}>
       {banner && (
@@ -89,7 +107,7 @@ function App() {
           }
           aria-hidden={view !== 'chat'}
         >
-          <ChatView config={config} />
+          <ChatView config={config} stats={stats} />
         </div>
         <div
           className={
@@ -99,7 +117,7 @@ function App() {
           }
           aria-hidden={view !== 'evaluation'}
         >
-          <EvaluationView onGoDocuments={() => setView('documents')} />
+          <EvaluationView stats={stats} onGoDocuments={() => setView('documents')} />
         </div>
       </div>
     </AppShell>

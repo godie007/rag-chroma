@@ -68,6 +68,24 @@ export async function resetVectorIndex(): Promise<ResetIndexResponse> {
   return res.json()
 }
 
+export type DeleteIndexedSourceResponse = {
+  source: string
+  chunks_removed: number
+  chunk_count: number
+  ready: boolean
+}
+
+export async function deleteIndexedSource(source: string): Promise<DeleteIndexedSourceResponse> {
+  const res = await fetch(`${base}/ingest/delete-source`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source }),
+    cache: 'no-store',
+  })
+  await handle(res)
+  return res.json()
+}
+
 export async function chat(question: string): Promise<ChatResponse> {
   const res = await fetch(`${base}/chat`, {
     method: 'POST',
@@ -112,6 +130,14 @@ export type ConfigPublic = {
 
 export async function fetchStats(): Promise<StatsResponse> {
   const res = await fetch(`${base}/stats`, { cache: 'no-store' })
+  await handle(res)
+  return res.json()
+}
+
+export type IndexedSourcesResponse = { sources: string[] }
+
+export async function fetchIndexedSources(): Promise<IndexedSourcesResponse> {
+  const res = await fetch(`${base}/stats/sources`, { cache: 'no-store' })
   await handle(res)
   return res.json()
 }

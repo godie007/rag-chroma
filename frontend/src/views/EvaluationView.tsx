@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
-import { runRagasEvaluation, type RagasEvaluateResponse } from '../api'
+import { runRagasEvaluation, type RagasEvaluateResponse, type StatsResponse } from '../api'
+import { IndexFragmentBadge } from '../components/IndexFragmentBadge'
 import { Icon } from '../components/Icon'
 
 const PRESET_FILES = ['evals/sample_eval.jsonl']
@@ -59,7 +60,13 @@ function buildInsight(r: RagasEvaluateResponse): string {
   return parts.join(' ')
 }
 
-export function EvaluationView({ onGoDocuments }: { onGoDocuments?: () => void }) {
+export function EvaluationView({
+  stats,
+  onGoDocuments,
+}: {
+  stats: StatsResponse | null
+  onGoDocuments?: () => void
+}) {
   const [preset, setPreset] = useState(PRESET_FILES[0])
   const [manualPath, setManualPath] = useState('')
   const [evalLoading, setEvalLoading] = useState(false)
@@ -105,6 +112,9 @@ export function EvaluationView({ onGoDocuments }: { onGoDocuments?: () => void }
         <p className="text-on-surface-variant max-w-2xl text-sm md:text-base">
           Valida el pipeline RAG con métricas estándar: fidelidad, relevancia, precisión y recuperación del contexto.
         </p>
+        <div className="mt-3">
+          <IndexFragmentBadge stats={stats} className="text-on-surface-variant" />
+        </div>
       </div>
 
       <div className="grid grid-cols-12 gap-6 md:gap-8">

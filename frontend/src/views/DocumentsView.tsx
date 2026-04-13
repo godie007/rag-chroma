@@ -1,10 +1,13 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  deleteIndexedSource,
+  fetchIndexedSources,
   ingestFiles,
   resetVectorIndex,
   type ConfigPublic,
   type StatsResponse,
 } from '../api'
+import { IndexFragmentBadge } from '../components/IndexFragmentBadge'
 import { Icon } from '../components/Icon'
 
 type QueueItem = {
@@ -39,6 +42,11 @@ export function DocumentsView({
   const [resetLoading, setResetLoading] = useState(false)
   const [resetModalError, setResetModalError] = useState<string | null>(null)
   const [showEmptyModal, setShowEmptyModal] = useState(false)
+  const [indexedSources, setIndexedSources] = useState<string[]>([])
+  const [sourcesLoading, setSourcesLoading] = useState(false)
+  const [sourcePendingDelete, setSourcePendingDelete] = useState<string | null>(null)
+  const [deleteSourceLoading, setDeleteSourceLoading] = useState(false)
+  const [deleteSourceError, setDeleteSourceError] = useState<string | null>(null)
 
   const maxBytes = config?.max_upload_bytes ?? 25 * 1024 * 1024
   const maxLabel = formatBytes(maxBytes)
@@ -78,6 +86,46 @@ export function DocumentsView({
     },
     [addFiles],
   )
+
+  const loadIndexedSources = useCallback(async () => {
+    setSourcesLoading(true)
+    try {
+      const { sources } = await fetchIndexedSources()
+      setIndexedSources(sources)
+    } catch {
+      setIndexedSources([])
+    } finally {
+      setSourcesLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadIndexedSources()
+  }, [loadIndexedSources, stats?.chunk_count, stats?.ready])
+
+  const onConfirmDeleteSource = useCallback(async () => {
+    if (!sourcePendingDelete?.trim()) return
+    setError(null)
+    setDeleteSourceError(null)
+    setDeleteSourceLoading(true)
+    try {
+      const res = await deleteIndexedSource(sourcePendingDelete)
+      setSourcePendingDelete(null)
+      onRagStatsPatch({
+        chunk_count: res.chunk_count,
+        ready: res.ready,
+      })
+      await onRefreshStats()
+      await loadIndexedSources()
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : 'No se pudo eliminar la fuente del índice.'
+      setDeleteSourceError(msg)
+      setError(msg)
+    } finally {
+      setDeleteSourceLoading(false)
+    }
+  }, [sourcePendingDelete, onRagStatsPatch, onRefreshStats, loadIndexedSources])
 
   const onIngestQueue = useCallback(async () => {
     const pending = queue.filter((x) => x.status === 'pending')
@@ -330,7 +378,63 @@ export function DocumentsView({
               </p>
             </button>
 
-            <div className="px-4 md:px-8 pb-4 flex flex-col gap-2">
+            <div className="px-4 md:px-8 pb-4 flex flex-col gap-4">
+              <div className="rounded-xl border border-outline-variant/20 bg-surface-container-low px-4 py-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                  <div className="flex flex-wrap items-center gap-2 min-w-0">
+                    <h3 className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant shrink-0">
+                      Archivos en el índice
+                    </h3>
+                    <IndexFragmentBadge stats={stats} className="text-[10px] text-on-surface-variant font-bold" />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void loadIndexedSources()}
+                    disabled={sourcesLoading || ingestLoading}
+                    className="text-[10px] font-bold uppercase tracking-wide text-primary hover:underline disabled:opacity-50"
+                  >
+                    {sourcesLoading ? 'Actualizando…' : 'Actualizar'}
+                  </button>
+                </div>
+                <p className="text-[11px] text-on-surface-variant mb-2">
+                  Fuentes reconocidas en Chroma (PDF, TXT o Markdown al subir). Puedes quitar una fuente: se borran sus
+                  vectores y el total de fragmentos se actualiza; para volver a tenerla en el índice, súbela otra vez.
+                </p>
+                {indexedSources.length === 0 && !sourcesLoading ? (
+                  <p className="text-sm text-on-surface-variant">
+                    {chunkCount > 0
+                      ? 'No se pudo listar fuentes (reintenta) o los trozos no tienen metadato de origen.'
+                      : 'Aún no hay documentos indexados.'}
+                  </p>
+                ) : sourcesLoading && indexedSources.length === 0 ? (
+                  <p className="text-sm text-on-surface-variant">Cargando lista…</p>
+                ) : (
+                  <ul className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                    {indexedSources.map((name) => (
+                      <li
+                        key={name}
+                        className="flex items-center gap-2 text-sm text-on-surface min-w-0 group/row"
+                        title={name}
+                      >
+                        <Icon name="article" className="text-base shrink-0 text-primary/80" />
+                        <span className="truncate font-medium flex-1 min-w-0">{name}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDeleteSourceError(null)
+                            setSourcePendingDelete(name)
+                          }}
+                          disabled={ingestLoading || deleteSourceLoading || sourcesLoading}
+                          className="shrink-0 p-1.5 rounded-lg text-error hover:bg-error/10 disabled:opacity-40"
+                          aria-label={`Quitar del índice ${name}`}
+                        >
+                          <Icon name="delete_outline" className="text-lg" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
               {hasLargePending && !ingestLoading && (
                 <p className="text-[11px] text-on-surface-variant leading-snug">
                   Hay PDFs ≥ 4&nbsp;MB en cola: la indexación puede tardar <strong>varios minutos u horas</strong>{' '}
@@ -416,6 +520,54 @@ export function DocumentsView({
           </div>
         </div>
       </div>
+
+      {sourcePendingDelete && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-700">
+            <div className="p-8 text-center">
+              <div className="w-16 h-16 bg-error-container/40 rounded-full flex items-center justify-center text-error mx-auto mb-4">
+                <Icon name="delete_forever" className="text-3xl" />
+              </div>
+              <h2 className="text-xl font-extrabold text-on-surface tracking-tight mb-2 font-headline">
+                ¿Quitar esta fuente del índice?
+              </h2>
+              <p className="text-on-surface-variant text-sm leading-relaxed mb-2 break-all px-1">
+                <span className="font-semibold text-on-surface">{sourcePendingDelete}</span>
+              </p>
+              <p className="text-on-surface-variant text-xs leading-relaxed mb-6">
+                Se eliminarán todos los fragmentos asociados en Chroma. El contador global de chunks se recalcula. Esta
+                acción no borra el archivo en tu disco, solo el índice vectorial.
+              </p>
+              {deleteSourceError && (
+                <p className="text-left text-sm text-error font-medium mb-4 rounded-lg border border-error/30 bg-error-container/15 px-3 py-2">
+                  {deleteSourceError}
+                </p>
+              )}
+              <div className="flex flex-col gap-3">
+                <button
+                  type="button"
+                  onClick={() => void onConfirmDeleteSource()}
+                  disabled={deleteSourceLoading}
+                  className="w-full py-3 bg-error text-white rounded-xl font-bold hover:opacity-90 transition-all active:scale-[0.98] disabled:opacity-50"
+                >
+                  {deleteSourceLoading ? 'Eliminando…' : 'Sí, quitar del índice'}
+                </button>
+                <button
+                  type="button"
+                  disabled={deleteSourceLoading}
+                  onClick={() => {
+                    setDeleteSourceError(null)
+                    setSourcePendingDelete(null)
+                  }}
+                  className="w-full py-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-xl font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition-all active:scale-[0.98] disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showEmptyModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">

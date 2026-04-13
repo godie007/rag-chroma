@@ -137,6 +137,62 @@ class ChromaStore:
         except Exception:
             return 0
 
+    def list_distinct_sources(self) -> list[str]:
+        """Nombres de fuente únicos (`metadata.source`) de todos los vectores en la colección."""
+        col = self.vectorstore._collection
+        seen: set[str] = set()
+        batch = 2000
+        offset = 0
+        while True:
+            try:
+                res = col.get(include=["metadatas"], limit=batch, offset=offset)
+            except Exception:
+                return sorted(seen)
+            metas = res.get("metadatas") if isinstance(res, dict) else None
+            if not metas:
+                break
+            for m in metas:
+                if not m or not isinstance(m, dict):
+                    continue
+                s = m.get("source")
+                if isinstance(s, str) and s.strip():
+                    seen.add(s)
+            if len(metas) < batch:
+                break
+            offset += batch
+        return sorted(seen)
+
+    def delete_by_source(self, source_name: str) -> int:
+        """Elimina todos los vectores cuyo metadato ``source`` coincide exactamente. Devuelve cuántos se borraron."""
+        name = str(source_name).strip()
+        if not name:
+            return 0
+        self.ensure_writable_before_ingest()
+        for attempt in range(3):
+            try:
+                col = self.vectorstore._collection
+                result = col.delete(where={"source": name})
+                if isinstance(result, dict):
+                    deleted = result.get("deleted")
+                else:
+                    deleted = getattr(result, "deleted", None)
+                if deleted is not None:
+                    return int(deleted)
+                return 0
+            except Exception as e:
+                msg = str(e).lower()
+                if attempt < 2 and (
+                    "readonly" in msg or "1032" in msg or "read-only" in msg or "read only" in msg
+                ):
+                    logger.warning(
+                        "Chroma delete por source (intento %s/3), reapertura: %s",
+                        attempt + 1,
+                        e,
+                    )
+                    self.reconnect()
+                    continue
+                raise
+
     def similarity_search_with_score(self, question: str, k: int):
         return self.vectorstore.similarity_search_with_score(question, k=k)
 

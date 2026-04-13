@@ -62,6 +62,13 @@ class RAGService:
     def collection_chunk_count(self) -> int:
         return self._chroma.collection_count()
 
+    def list_indexed_sources(self) -> list[str]:
+        return self._chroma.list_distinct_sources()
+
+    def delete_indexed_source(self, source_name: str) -> int:
+        """Quita del índice todos los trozos asociados a una fuente (metadato ``source``)."""
+        return self._chroma.delete_by_source(source_name)
+
     def clear_vector_index(self) -> None:
         """Borra la persistencia de Chroma en disco y recrea una colección vacía."""
         resolved = Path(self.settings.chroma_persist_directory)

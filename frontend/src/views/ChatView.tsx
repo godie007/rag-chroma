@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { chat, getApiBase, type ChatResponse, type ConfigPublic } from '../api'
+import { chat, getApiBase, type ChatResponse, type ConfigPublic, type StatsResponse } from '../api'
+import { IndexFragmentBadge } from '../components/IndexFragmentBadge'
 import { MarkdownContent } from '../components/MarkdownContent'
 import { Icon } from '../components/Icon'
 
@@ -14,7 +15,7 @@ function timeLabel(): string {
   return new Intl.DateTimeFormat('es', { hour: '2-digit', minute: '2-digit' }).format(new Date())
 }
 
-export function ChatView({ config }: { config: ConfigPublic | null }) {
+export function ChatView({ config, stats }: { config: ConfigPublic | null; stats: StatsResponse | null }) {
   const [turns, setTurns] = useState<ChatTurn[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -56,6 +57,9 @@ export function ChatView({ config }: { config: ConfigPublic | null }) {
     <div className="flex flex-1 flex-col min-h-0">
       <main className="flex-1 overflow-y-auto bg-surface-bright flex flex-col items-center min-h-0">
         <div className="w-full max-w-[44rem] px-6 py-10 md:py-12 space-y-10">
+          <div className="flex justify-center">
+            <IndexFragmentBadge stats={stats} className="px-3 py-1.5 rounded-full bg-surface-container-low border border-outline-variant/15" />
+          </div>
           {turns.length === 0 && (
             <p className="text-center text-sm text-on-surface-variant">
               Haz una pregunta sobre los documentos indexados.
