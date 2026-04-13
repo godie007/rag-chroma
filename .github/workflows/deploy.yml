@@ -30,7 +30,7 @@ jobs:
           cd /home/jetson/codla/backend
           rm -rf chroma_db
           cp .env.example .env
-          pip3 install -r requirements.txt --ignore-installed || true
+          pip3 install -r requirements.txt || pip3 install uvicorn fastapi langchain chromadb openai
           sudo cp rag-backend.service /etc/systemd/system/
           sudo systemctl daemon-reload || true
           sudo systemctl enable rag-backend || true
