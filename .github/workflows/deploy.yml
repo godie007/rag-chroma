@@ -24,10 +24,10 @@ jobs:
 
       - name: Deploy Backend
         run: |
-          mkdir -p /home/jetson/codla
-          rm -rf /home/jetson/codla/backend
-          cp -r $GITHUB_WORKSPACE/backend /home/jetson/codla/
-          cd /home/jetson/codla/backend
+          mkdir -p /home/jetson/workspace/codla
+          rm -rf /home/jetson/workspace/codla/backend
+          cp -r $GITHUB_WORKSPACE/backend /home/jetson/workspace/codla/
+          cd /home/jetson/workspace/codla/backend
           rm -rf chroma_db
           cp .env.example .env
           pip3 install --upgrade pip setuptools wheel
@@ -45,10 +45,10 @@ jobs:
 
       - name: Deploy Frontend
         run: |
-          mkdir -p /home/jetson/codla
-          rm -rf /home/jetson/codla/frontend
-          cp -r $GITHUB_WORKSPACE/frontend /home/jetson/codla/
-          cd /home/jetson/codla/frontend
+          mkdir -p /home/jetson/workspace/codla
+          rm -rf /home/jetson/workspace/codla/frontend
+          cp -r $GITHUB_WORKSPACE/frontend /home/jetson/workspace/codla/
+          cd /home/jetson/workspace/codla/frontend
           cp .env.example .env
           npm install || true
           sudo cp rag-frontend.service /etc/systemd/system/
