@@ -76,7 +76,7 @@ npm run lint
 **Entry point:** `backend/app/main.py`
 - FastAPI application with lifespan context manager
 - CORS middleware configured via `Settings.cors_origins`
-- Global instances: `_settings` (config), `_rag` (RAG service)
+- Global instances: `_settings` (config), `_rag` (RAG service), optional asyncio task `_whatsapp_poll_task` when `WHATSAPP_ENABLED` and polling is on
 
 **Core modules:**
 
@@ -96,6 +96,7 @@ npm run lint
 
 4. **`prompts.py`** — LLM instruction strings
    - `SYSTEM_RAG`, `SYSTEM_NO_RETRIEVAL`, `build_rag_user_message`, `build_no_retrieval_user_message`
+   - User-facing answers avoid technical jargon (“fragments”, “RAG”); professional tone toward end users
 
 5. **`preprocess.py`** — document handling
    - `load_document_bytes(filename, raw_bytes)`: dispatches to PDF/Markdown/text loaders
@@ -111,6 +112,12 @@ npm run lint
 7. **`paths.py`** — path resolution
    - `resolve_eval_jsonl_path()`: normalizes eval file paths relative to project root
 
+8. **`whatsapp_poll.py`** — optional WhatsApp bridge (no Evolution API)
+   - Polls Jetson Flask API (`WHATSAPP_API_BASE_URL`, default example `http://192.168.1.254:8090`): mode `recent` → `GET /messages/recent` (items include `is_from_me`); mode `chats` → `GET /chats` then `GET /messages?chat_jid=…` (same `is_from_me` per message)
+   - Sends replies via `POST /send/text` (`phone`, `message`)
+   - `POST /webhooks/whatsapp` on this backend for push-style delivery from the Jetson (`whatsapp_receiver.sh` or Flask); optional `WHATSAPP_WEBHOOK_SECRET` header
+   - Dedup: message IDs, bot reply echo (same text in chat), allowlist `WHATSAPP_ALLOWED_SENDER_NUMBERS`, optional `WHATSAPP_PROCESS_FROM_ME` for same-line-as-GOWA testing
+
 **API Endpoints:**
 - `GET /health` — service availability
 - `GET /stats` — chunk count, collection name, readiness
@@ -120,6 +127,12 @@ npm run lint
 - `POST /chat` — `{"question": "..."}` → `{"answer": "...", "sources": [...]}`
 - `GET /retrieve` — debug endpoint; returns raw retrieved contexts and metadata
 - `POST /evaluate` — runs RAGAS evaluation (RAGAS pinned in `requirements.txt`)
+- `GET /webhooks/whatsapp` — ping / integration hints (WhatsApp)
+- `POST /webhooks/whatsapp` — inbound message JSON for RAG reply (WhatsApp)
+
+### WhatsApp deployment note
+
+Typical edge setup: **GOWA** (Docker) on port **3000** and **Flask API** on **8090** on a Jetson (or similar). This RAG backend only talks HTTP to **8090**. Use `uvicorn --host 0.0.0.0` if the Jetson must call back to `POST /webhooks/whatsapp` on the dev machine.
 
 ### Frontend Structure
 
@@ -130,6 +143,7 @@ npm run lint
 - Document upload with drag-and-drop
 - Retrieval debug viewer (shows contexts used for answer)
 - RAGAS evaluation section (displays metrics and per-question results)
+- When WhatsApp is enabled, chat footer can show polling mode and webhook URL (`/config` fields `whatsapp_*`)
 - Responsive layout with dark/light mode support
 
 **Configuration:**
@@ -151,14 +165,18 @@ npm run lint
    - Return top-K chunks, sorted by relevance (ascending L2 distance)
 
 3. **Generation:**
-   - Pass question + retrieved contexts to LLM using `prompts.py` system and user templates (context-only when fragments exist)
+   - Pass question + retrieved contexts to LLM using `prompts.py` system and user templates (contextual mode when documentation excerpts exist)
    - Return answer + list of retrieved contexts passed to the model
 
-4. **Evaluation:**
+4. **Evaluation (RAGAS):**
    - RAGAS loads eval dataset (questions + ground truth answers)
    - For each question: `rag.retrieve` then `rag.generate` to build contexts and answer
    - Compute metrics (faithfulness, answer_relevancy, context_precision, context_recall)
    - Average across all questions; return aggregates and per-question breakdown
+
+5. **WhatsApp (optional):**
+   - Background poll or webhook receives a user message → same `retrieve` + `generate` as `/chat` → `POST` Jetson `/send/text`
+   - See `backend/.env.example` (`WHATSAPP_*`) and `docs/ARQUITECTURA.md`
 
 ## Key Considerations
 
@@ -167,3 +185,4 @@ npm run lint
 - **Chunking params affect indexing:** Changing `CHUNK_SIZE` or `CHUNK_OVERLAP` requires calling `POST /ingest/reset` and re-uploading documents to regenerate embeddings. Changes to `TOP_K` or MMR params only require restarting the backend.
 - **Large PDFs:** The default PDF-GenAI-Challenge.pdf is ~600+ pages. Default chunk size is 1280 with 20% overlap to handle this gracefully. Adjust `CHUNK_SIZE`, `TOP_K`, `MMR_FETCH_K` if needed.
 - **RAGAS evaluation:** Included in `requirements.txt`. Evaluation is slow (several minutes) due to LLM calls per metric, per question.
+- **WhatsApp:** Configure `WHATSAPP_*` in `backend/.env`; details in `docs/VARIABLES_ENTORNO.md` and `docs/ARQUITECTURA.md`. No Docker Evolution stack in this repo.

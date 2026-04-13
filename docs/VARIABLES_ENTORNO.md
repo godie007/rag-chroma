@@ -46,6 +46,7 @@ Todas se cargan vía Pydantic Settings (`app.config.Settings`). Los nombres en e
 | `RETRIEVE_MAX_L2_DISTANCE` | `1.3` | Distancia L2 máxima aceptada en la búsqueda vectorial de Chroma. | Umbral empírico para embeddings small: por debajo suelen quedar resultados útiles; por encima, consultas vagas o fuera de dominio no llenan el contexto con ruido. **Bajar** si entra basura; **subir** si consultas en otro idioma que el índice empeoran las distancias. |
 | `RETRIEVE_RELEVANCE_MARGIN` | `0.10` | Tras ordenar por distancia, se descartan fragmentos con distancia **> mejor_distancia + margen**. | Recorta la “cola” poco relacionada sin forzar siempre `TOP_K` documentos irrelevantes. Con `best_d` alto (p. ej. consultas cruzando idioma), el código **reduce el margen** de forma adaptativa. |
 | `RETRIEVE_ELBOW_L2_GAP` | `0` | Si > 0, corta la lista cuando el salto L2 entre dos vecinos consecutivos supera este valor (“codo”). | `0` = desactivado: comportamiento más simple. Actívalo (p. ej. `0.15`) si quieres cortar cuando el índice ordenado muestra un salto brusco de relevancia. |
+| `LLM_RETRIEVAL_PROFILE` | `true` | Una llamada ligera al LLM decide si ampliar umbrales de recuperación para preguntas de cobertura (“¿qué cubre el índice?”). | `false` ahorra esa llamada y usa siempre el perfil de recuperación “normal”. |
 
 ### CORS y subidas
 
@@ -58,6 +59,34 @@ Todas se cargan vía Pydantic Settings (`app.config.Settings`). Los nombres en e
 
 - Si cambias **`CHUNK_SIZE`** o **`CHUNK_OVERLAP`**, los vectores antiguos no son comparables: usa **`POST /ingest/reset`** y vuelve a ingerir.
 - Si solo cambias **`TOP_K`**, MMR o umbrales de recuperación, basta **reiniciar** uvicorn.
+
+<a id="whatsapp-jetson"></a>
+
+### WhatsApp (Jetson / API :8090)
+
+Integración **opcional** con una API Flask propia (p. ej. en NVIDIA Jetson: **GOWA Docker :3000** + **API :8090**). El backend RAG solo habla HTTP con `WHATSAPP_API_BASE_URL`; no incluye contenedores de terceros en este repositorio.
+
+| Variable | Default / ejemplo | Definición |
+|----------|-------------------|------------|
+| `WHATSAPP_ENABLED` | `false` | Activa la integración (polling y/o webhook). Requiere RAG inicializado (`OPENAI_API_KEY`). |
+| `WHATSAPP_API_BASE_URL` | `http://192.168.1.254:8090` | Base URL de la API Flask (sin barra final). |
+| `WHATSAPP_POLL_ENABLED` | `true` | Si `false`, no arranca el bucle de polling; puedes usar solo `POST /webhooks/whatsapp`. |
+| `WHATSAPP_POLL_MODE` | `recent` | `recent` → `GET /messages/recent` (incluye `is_from_me` por mensaje; el backend filtra salvo `WHATSAPP_PROCESS_FROM_ME`). `chats` → `GET /chats` + por cada JID `GET /messages?chat_jid=…` (mismo campo `is_from_me`). |
+| `WHATSAPP_POLL_INTERVAL_SEC` | `4` | Segundos entre consultas de polling. |
+| `WHATSAPP_POLL_LIMIT` | `50` | Límite en `messages/recent`. |
+| `WHATSAPP_CHATS_POLL_LIMIT` | `25` | Máx. chats en modo `chats`. |
+| `WHATSAPP_MESSAGES_PER_CHAT_LIMIT` | `40` | Mensajes por chat en modo `chats`. |
+| `WHATSAPP_API_KEY` | *(vacío)* | Si la API :8090 exige `Authorization: Bearer`, colócala aquí. |
+| `WHATSAPP_WEBHOOK_SECRET` | *(vacío)* | Si tiene valor, `POST /webhooks/whatsapp` exige `X-WhatsApp-Webhook-Secret` o `Authorization: Bearer` con el mismo valor. |
+| `WHATSAPP_REPLY_IN_GROUPS` | `false` | Responder en grupos `@g.us` (la API de envío debe soportarlo). |
+| `WHATSAPP_POLL_LOG_BODY` | `false` | Log de depuración de claves JSON del poll. |
+| `WHATSAPP_ALLOWED_SENDER_NUMBERS` | *(vacío)* | Solo dígitos (E.164 sin `+`), separados por coma. Vacío = todos los chats 1:1. |
+| `WHATSAPP_PROCESS_FROM_ME` | `false` | `true` si tus mensajes llegan como `is_from_me` (mismo número que GOWA); puede requerir filtro de eco. |
+| `WHATSAPP_FROM_ME_MAX_QUESTION_CHARS` | `4000` | Con `PROCESS_FROM_ME`, ignora textos `from_me` más largos (heurística anti-respuesta del bot). |
+
+**Eco / bucles:** el código registra el texto enviado con `POST /send/text` y evita volver a pasar por el RAG el mismo contenido en el mismo chat durante ~15 minutos.
+
+**Red:** el host del backend debe resolver la IP del Jetson; para webhooks desde el Jetson hacia tu PC de desarrollo, suele usarse `uvicorn --host 0.0.0.0`.
 
 ---
 

@@ -6,7 +6,7 @@ Documento de referencia para la prueba técnica: componentes, flujos, persistenc
 
 ## 1. Objetivo
 
-Sistema **RAG** (Retrieval-Augmented Generation) para **control de calidad del conocimiento interno**: los usuarios indexan documentos (PDF, Markdown, texto), el backend recupera fragmentos relevantes con embeddings y un LLM genera respuestas ancladas al contexto. La evaluación **RAGAS** mide fidelidad, relevancia, precisión y recuperación del contexto.
+Sistema **RAG** (Retrieval-Augmented Generation) para **control de calidad del conocimiento interno**: los usuarios indexan documentos (PDF, Markdown, texto), el backend recupera contenido relevante con embeddings y un LLM genera respuestas ancladas a la documentación, con **lenguaje claro** hacia el usuario final (sin jerga interna tipo “fragmentos” en las respuestas). La evaluación **RAGAS** mide fidelidad, relevancia, precisión y recuperación del contexto. Opcionalmente, el mismo flujo alimenta **respuestas por WhatsApp** vía una API HTTP en red (p. ej. Jetson + GOWA).
 
 ---
 
@@ -18,15 +18,21 @@ Actores externos, aplicación y almacenes lógicos.
 flowchart TB
     subgraph Cliente
         U[Usuario / navegador]
+        WA[WhatsApp<br/>móvil]
     end
 
     subgraph Aplicación
         FE[Frontend React + Vite]
-        BE[Backend FastAPI]
+        BE[Backend FastAPI<br/>RAG + opcional WhatsApp]
     end
 
     subgraph Externo
         OAI[API OpenAI<br/>embeddings + chat]
+    end
+
+    subgraph Red_opcional["Red local (opcional)"]
+        JAPI[API Flask Jetson :8090]
+        GOWA[GOWA Docker :3000]
     end
 
     subgraph Local
@@ -39,12 +45,15 @@ flowchart TB
     BE -->|HTTPS| OAI
     BE --> CH
     U -.->|sube archivos| FE
-    FE --> BE
+    WA -.->|mensaje vía WA| GOWA
+    GOWA --> JAPI
+    BE <-->|polling /send/text<br/>o webhook POST| JAPI
 ```
 
 - **Frontend**: no contiene secretos; solo llama al backend.
-- **Backend**: único componente con `OPENAI_API_KEY` y acceso a Chroma.
+- **Backend**: único componente con `OPENAI_API_KEY` y acceso a Chroma; opcionalmente consulta la **API WhatsApp** en otro host (p. ej. Jetson) y expone `POST /webhooks/whatsapp`.
 - **Chroma**: SQLite + archivos de persistencia bajo `CHROMA_PERSIST_DIRECTORY`.
+- **Jetson (opcional)**: GOWA en **:3000** y servicio Flask en **:8090**; el RAG solo usa HTTP al **:8090**. Endpoints de lectura relevantes: **`GET /messages/recent`** (últimos mensajes globales; cada ítem incluye **`is_from_me: true|false`**) y **`GET /messages?chat_jid=…`** (historial de un chat; mismo campo). Envío: **`POST /send/text`**. Lista de chats: **`GET /chats`**.
 
 ---
 
@@ -70,11 +79,13 @@ flowchart LR
     subgraph opt[Opcional]
         EV[evaluation RAGAS]
         PA[paths evals/]
+        WP[whatsapp_poll]
     end
 
     R --> RS
     R --> PP
     R --> CF
+    R --> WP
     R --> EV
     EV --> PA
     RS --> PP
@@ -94,6 +105,39 @@ flowchart LR
 | `preprocess.py` | Carga de documentos, limpieza PDF, segmentación por fences Markdown, fusión de trozos cortos. |
 | `evaluation.py` | Pipeline RAGAS asíncrono sobre el mismo `RAGService`. |
 | `paths.py` | Resolución segura de rutas bajo `evals/`. |
+| `whatsapp_poll.py` | Integración WhatsApp: polling a la API remota, webhook entrante, deduplicación, eco de respuestas del bot, envío `POST /send/text`. |
+
+---
+
+## 3B. Secuencia: WhatsApp (polling o webhook)
+
+Mismo núcleo RAG que `POST /chat`; la salida se envía al número vía API Jetson.
+
+```mermaid
+sequenceDiagram
+    participant WA as WhatsApp / GOWA
+    participant J as API Flask :8090
+    participant BE as Backend FastAPI
+    participant RS as RAGService
+    participant OAI as OpenAI
+
+    Note over BE,J: Opción A — polling interno
+    loop Cada WHATSAPP_POLL_INTERVAL_SEC
+        BE->>J: GET /messages/recent o /chats + /messages
+        J-->>BE: JSON mensajes
+        BE->>RS: retrieve + generate
+        RS->>OAI: embeddings + chat
+        OAI-->>RS: respuesta
+        BE->>J: POST /send/text
+        J->>WA: entrega mensaje
+    end
+
+    Note over BE,J: Opción B — push
+    J->>BE: POST /webhooks/whatsapp (desde receiver o Flask)
+    BE->>RS: retrieve + generate
+    RS->>OAI: embeddings + chat
+    BE->>J: POST /send/text
+```
 
 ---
 
@@ -143,9 +187,9 @@ sequenceDiagram
     CH-->>RS: candidatos + distancia L2
     RS->>RS: filtros + MMR opcional
     API->>RS: generate(question, contexts)
-    alt Hay fragmentos
+    alt Hay contexto documental
         RS->>OAI: chat completions prompts.SYSTEM_RAG + contexto
-    else Sin fragmentos
+    else Sin contexto recuperado
         RS->>OAI: chat completions prompts.SYSTEM_NO_RETRIEVAL
     end
     OAI-->>RS: answer
@@ -187,7 +231,7 @@ sequenceDiagram
 flowchart TB
     subgraph repo[pruebaScanntech]
         subgraph BE[backend/app]
-            CORE[main config rag_service preprocess prompts paths evaluation]
+            CORE[main config rag_service preprocess prompts paths evaluation whatsapp_poll]
             PER[persistence chroma.py]
         end
         FE[frontend/src]
@@ -200,7 +244,7 @@ flowchart TB
 ```
 
 - **`backend/app/persistence/`**: capa de infraestructura para Chroma (`ChromaStore` en `chroma.py`); separa I/O y permisos de la lógica RAG en `rag_service.py`.
-- **`backend/app/prompts.py`**: único lugar habitual para editar textos de sistema y plantillas de usuario del chat.
+- **`backend/app/prompts.py`**: único lugar habitual para editar textos de sistema y plantillas de usuario del chat; incluye reglas de **tono** hacia el usuario final (evitar jerga tipo “fragmentos” o “RAG” en respuestas).
 
 ---
 
@@ -231,6 +275,9 @@ Definidas en `backend/app/config.py` (Pydantic Settings). Los nombres en **MAYÚ
 | `RETRIEVE_ELBOW_L2_GAP` | `retrieve_elbow_l2_gap` | `0.0` | Si > 0, corta la lista cuando el salto L2 entre vecinos ordenados supera este valor. |
 | `CORS_ORIGINS` | `cors_origins` | `http://localhost:5173,...` | Orígenes permitidos, separados por coma. |
 | `MAX_UPLOAD_BYTES` | `max_upload_bytes` | `209715200` (~200 MiB) | Tamaño máximo por archivo en `POST /ingest`. |
+| `LLM_RETRIEVAL_PROFILE` | `llm_retrieval_profile` | `true` | Mini-llamada LLM para decidir recuperación amplia vs normal. |
+
+**WhatsApp** (`WHATSAPP_*`): ver [VARIABLES_ENTORNO — WhatsApp](./VARIABLES_ENTORNO.md#whatsapp-jetson) y `backend/.env.example`.
 
 ---
 
@@ -256,16 +303,21 @@ Vite solo expone al bundle variables que empiezan por `VITE_`.
 | `POST` | `/chat` | Body JSON `{"question": "..."}` → `answer` + `sources`. |
 | `GET` | `/retrieve` | Depuración: contextos recuperados para `q`. |
 | `POST` | `/evaluate` | RAGAS; query opcional `eval_relative_path`. |
+| `GET` | `/webhooks/whatsapp` | Comprobación e indicaciones de integración (WhatsApp). |
+| `POST` | `/webhooks/whatsapp` | Cuerpo JSON con mensaje(s) entrante(s); opcional secreto vía cabecera (ver `WHATSAPP_WEBHOOK_SECRET`). |
+
+`GET /config` expone, entre otros, `whatsapp_polling_active`, `whatsapp_webhook_active`, `whatsapp_poll_mode`, `whatsapp_api_base_url`, `whatsapp_poll_interval_sec` (sin secretos).
 
 ---
 
 ## 11. Decisiones de diseño breves
 
-- **Precisión documental**: con fragmentos recuperados, el system prompt en `app.prompts` (`SYSTEM_RAG`) exige ceñirse al contexto; sin fragmentos se usa `SYSTEM_NO_RETRIEVAL` para distinguir preguntas meta de falta de cobertura en el índice.
+- **Precisión documental**: con contexto recuperado del índice, el system prompt en `app.prompts` (`SYSTEM_RAG`) exige ceñirse al material documental; sin coincidencias útiles se usa `SYSTEM_NO_RETRIEVAL` para distinguir preguntas meta de falta de cobertura.
+- **Lenguaje al usuario**: las instrucciones del LLM piden tono profesional y evitan términos técnicos internos (“fragmentos”, “embeddings”) en las respuestas finales, salvo que el usuario pregunte cómo funciona la herramienta.
 - **PDF**: PyMuPDF primero; limpieza de artefactos (`|`, glifos, ejes) en `preprocess.py`.
 - **Código en Markdown**: separadores y segmentación por bloques `` ``` `` para no partir fences completos cuando caben en el tope de fusión.
 - **Chroma**: persistencia local gestionada por `ChromaStore`; el reset elimina la carpeta configurada (con salvaguardas de ruta en `RAGService`) para evitar índices huérfanos.
 
 ---
 
-*Última revisión: estructura `persistence/`, `prompts.py` y `rag_service` alineados con `backend/app` y `frontend/src`.*
+*Última revisión: integración WhatsApp (`whatsapp_poll.py`), webhooks, diagrama de red Jetson y tono de respuestas en `prompts.py`; alineado con `backend/app` y `frontend/src`.*

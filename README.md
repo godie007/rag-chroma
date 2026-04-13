@@ -12,7 +12,7 @@ La aplicación web ofrece tres vistas principales, alineadas con el flujo de tra
 | Archivo en `docs/images/` | Vista | Funcionalidades que se observan |
 |----------------------------|--------|----------------------------------|
 | `homePage.png` | **Documentos** | Subida de archivos (PDF, Markdown, TXT), cola de procesamiento, **Vaciar índice** con confirmación, parámetros de recuperación y chunking desde el servidor (`/config`), estado del índice (fragmentos, colección). |
-| `chatBotPage.png` | **Chat** | Conversación con respuestas ancladas a fragmentos recuperados, historial, **fuentes** por mensaje, indicadores de salud del backend (`/health`). |
+| `chatBotPage.png` | **Chat** | Conversación con respuestas ancladas al material indexado, historial, **fuentes** (extractos) por mensaje, estado de WhatsApp si está activo (`/config`), `/health`. |
 | `EvaluateRAGASPage.png` | **Evaluación** | Ejecución de **RAGAS** vía `POST /evaluate`, dataset (p. ej. `evals/sample_eval.jsonl`), métricas agregadas y desglose por pregunta. |
 
 ### Vista Documentos
@@ -27,7 +27,7 @@ Gestión del corpus: arrastra o selecciona archivos, revisa la cola, indexa por 
 
 ### Vista Chat
 
-El asistente responde en el idioma de la pregunta usando pasajes recuperados del índice. Cada turno puede expandirse para inspeccionar el texto de los fragmentos utilizados y validar citas frente al contenido indexado.
+El asistente responde en el idioma de la pregunta usando el contenido indexado. Cada turno puede expandirse para inspeccionar los extractos de las fuentes y validar frente a la documentación cargada.
 
 <p align="center">
   <img src="docs/images/chatBotPage.png" alt="Vista Chat: historial, respuesta del asistente y fuentes de contexto" width="920" />
@@ -51,7 +51,16 @@ Evaluación offline sobre un fichero `.jsonl` con pares pregunta / *ground truth
 2. **Fragmentación:** `RecursiveCharacterTextSplitter` con `CHUNK_SIZE`, `CHUNK_OVERLAP` y separadores pensados para texto extraído de PDF (párrafos, líneas, frases).
 3. **Embeddings + índice:** embeddings OpenAI → almacenamiento en Chroma persistido en disco.
 4. **Recuperación:** candidatos por similitud L2; se descartan los que superan `RETRIEVE_MAX_L2_DISTANCE`. El resto se **ordena de más a menos relevante** y se recorta con `RETRIEVE_RELEVANCE_MARGIN` (distancia ≤ mejor + margen). Opcionalmente `RETRIEVE_ELBOW_L2_GAP` corta cuando hay un salto grande entre dos vecinos consecutivos. Sobre el conjunto resultante, **MMR** (opcional) elige hasta `TOP_K` y el orden final vuelve a ser **por relevancia** (menor distancia primero) para el prompt.
-5. **Generación:** prompts de sistema y plantillas de usuario en **`backend/app/prompts.py`**; el modelo chat es configurable por `.env`. Sin fragmentos recuperados se usa un system prompt distinto para no inventar contenido del índice.
+5. **Generación:** prompts de sistema y plantillas de usuario en **`backend/app/prompts.py`**; el modelo chat es configurable por `.env`. Sin contexto documental recuperado se usa un system prompt distinto para no inventar contenido del índice. Las respuestas al usuario final evitan jerga técnica (“fragmentos”, “RAG”): lenguaje de profesional a usuario.
+
+### WhatsApp (opcional)
+
+Si tienes una **API Flask en red** (p. ej. en un Jetson con **GOWA en :3000** y **API en :8090**), el backend puede:
+
+- **Enviar** respuestas con `POST {WHATSAPP_API_BASE_URL}/send/text` (`phone`, `message`).
+- **Recibir** mensajes con **polling**: `GET /messages/recent` (cada mensaje trae `is_from_me: true/false` para distinguir entrantes/salientes) o modo **chats** → `GET /chats` y luego `GET /messages?chat_jid=…` por conversación (mismo campo `is_from_me`). Alternativa: **`POST /webhooks/whatsapp`** hacia este servidor (p. ej. `whatsapp_receiver.sh` en el Jetson).
+
+Variables: ver **`backend/.env.example`** (`WHATSAPP_*`) y [docs/VARIABLES_ENTORNO.md](docs/VARIABLES_ENTORNO.md). El backend debe alcanzar la IP del Jetson y, en dev, suele usarse `uvicorn --host 0.0.0.0` para que el Jetson pueda llamar al webhook si aplica.
 
 ## Requisitos
 
@@ -76,7 +85,7 @@ También puedes usar `chmod +x run_dev.sh && ./run_dev.sh` desde `backend/`.
 
 Arranca desde `backend/` para que se cargue `backend/.env`.
 
-**Rutas útiles:** `GET /health`, `POST /ingest` (multipart, campo `files`), `POST /ingest/reset` (borra la colección Chroma; necesario si cambias chunking y quieres re-embeddar), `POST /chat` (JSON `{"question":"..."}`), `GET /retrieve?q=...` (solo contextos, útil para evaluación), `POST /evaluate` (query opcional `eval_relative_path=evals/sample_eval.jsonl`) — ejecuta RAGAS en el servidor; tarda varios minutos.
+**Rutas útiles:** `GET /health`, `POST /ingest` (multipart, campo `files`), `POST /ingest/reset` (borra la colección Chroma; necesario si cambias chunking y quieres re-embeddar), `POST /chat` (JSON `{"question":"..."}`), `GET /retrieve?q=...` (solo contextos, útil para evaluación), `POST /evaluate` (query opcional `eval_relative_path=evals/sample_eval.jsonl`) — ejecuta RAGAS en el servidor; tarda varios minutos. **WhatsApp:** `GET /webhooks/whatsapp` (comprobación), `POST /webhooks/whatsapp` (mensaje entrante JSON; opcional `WHATSAPP_WEBHOOK_SECRET`).
 
 **Ajuste para PDFs muy largos** (p. ej. `PDF-GenAI-Challenge.pdf`, ~600+ páginas): por defecto `CHUNK_SIZE=1280`, `CHUNK_OVERLAP=256` (~20 %), `TOP_K=6`, `MMR_FETCH_K=80`, `MMR_LAMBDA=0.91`. Si cambias `CHUNK_SIZE` u `CHUNK_OVERLAP`, usa **Vaciar índice** y vuelve a ingerir el PDF. Cambios solo de `TOP_K`/MMR: reinicia uvicorn.
 
@@ -123,12 +132,12 @@ pruebaScanntech/
 ├── backend/
 │   └── app/
 │       ├── main.py, config.py, rag_service.py, preprocess.py, paths.py, evaluation.py
-│       ├── prompts.py          # instrucciones LLM (SYSTEM_RAG, etc.)
-│       └── persistence/       # Chroma en disco (ChromaStore)
+│       ├── prompts.py          # instrucciones LLM (SYSTEM_RAG, SYSTEM_NO_RETRIEVAL, tono usuario)
+│       ├── whatsapp_poll.py    # integración WhatsApp (polling + eco de respuestas + webhook)
+│       └── persistence/        # Chroma en disco (ChromaStore)
 ├── docs/             # ARQUITECTURA.md, VARIABLES_ENTORNO.md, images/ (capturas de la UI)
 ├── frontend/         # React (Vite)
 ├── evals/            # sample_eval.jsonl + README
 ├── data/             # Documentos a indexar (vacío salvo README)
 └── README.md
 ```
-# codla

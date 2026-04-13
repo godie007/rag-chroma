@@ -314,6 +314,10 @@ def whatsapp_webhook_ping():
         "ok": True,
         "post": "JSON con un mensaje o lista / data / messages (mismo criterio que normalize_whatsapp_inbound).",
         "upstream_ports": {"gowa_docker": 3000, "whatsapp_api_flask": 8090},
+        "upstream_read_endpoints": {
+            "recent": "GET /messages/recent — cada mensaje incluye is_from_me (true/false)",
+            "by_chat": "GET /messages?chat_jid=<jid> — historial de un chat; mismo is_from_me",
+        },
         "jetson_scripts": ["whatsapp_api.py", "whatsapp_receiver.sh"],
     }
 

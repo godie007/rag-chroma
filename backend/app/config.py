@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     openai_chat_model: str = "gpt-4o-mini"
     openai_chat_temperature: float = Field(default=0.1, ge=0.0, le=2.0)
     # Límite de tokens de salida del chat RAG (respuestas largas / prompts detallados).
-    openai_chat_max_output_tokens: int = Field(default=4096, ge=256, le=128_000)
+    openai_chat_max_output_tokens: int = Field(default=2096, ge=256, le=128_000)
     openai_embedding_model: str = "text-embedding-3-small"
     openai_api_base: str | None = None
     chroma_persist_directory: str = "./chroma_db"
@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     whatsapp_enabled: bool = False
     whatsapp_api_base_url: str = "http://192.168.1.254:8090"
     whatsapp_poll_enabled: bool = True
-    # recent = GET /messages/recent?limit=… | chats = GET /chats + GET /messages?chat_jid=… por chat
+    # recent = GET /messages/recent?limit=… (cada msg: is_from_me) | chats = GET /chats + GET /messages?chat_jid=… por chat
     whatsapp_poll_mode: Literal["recent", "chats"] = "recent"
     whatsapp_poll_interval_sec: float = Field(default=4.0, ge=0.5, le=120.0)
     whatsapp_poll_limit: int = Field(default=50, ge=5, le=200)
@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     # número/WhatsApp que está en el Jetson; en producción puede re-encolar respuestas largas del bot → usar heurística.
     whatsapp_process_from_me: bool = False
     whatsapp_from_me_max_question_chars: int = Field(default=4000, ge=500, le=32000)
+    # Polling: no ejecutar RAG sobre el histórico que devuelve /messages/recent o /messages al arrancar.
+    # Solo mensajes con timestamp API >= (hora de arranque del bucle de poll − skew). Webhook no usa este filtro.
+    whatsapp_poll_skip_messages_before_start: bool = True
+    whatsapp_poll_start_skew_sec: float = Field(default=90.0, ge=0.0, le=86400.0)
 
     @field_validator("whatsapp_poll_mode", mode="before")
     @classmethod

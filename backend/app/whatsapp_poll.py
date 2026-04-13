@@ -1,4 +1,21 @@
-"""WhatsApp (API Flask :8090 ↔ GOWA :3000 en el Jetson): recepción vía polling y/o webhook → RAG → POST …/send/text."""
+"""WhatsApp (API Flask :8090 ↔ GOWA :3000 en el Jetson): recepción vía polling y/o webhook → RAG → POST …/send/text.
+
+Contrato habitual de la API Flask en el Jetson (consultar README del dispositivo si cambia):
+
+- ``GET /messages/recent?limit=…`` — últimos mensajes de todos los chats; cada ítem incluye
+  ``is_from_me: true|false``. El RAG ignora ``from_me`` salvo ``WHATSAPP_PROCESS_FROM_ME=true``
+  (y aplica filtro de eco de respuestas del bot).
+- ``GET /messages?chat_jid=<jid>&limit=…`` — historial de un chat concreto; mismo campo
+  ``is_from_me``. Modo polling ``chats``: se usa tras ``GET /chats`` para recorrer cada JID.
+
+Cada **conversación** (``chat_jid`` / bucket de eco) es independiente: la deduplicación de IDs de
+mensaje y el registro de eco del bot van por chat, de modo que hablar contigo mismo en un hilo no
+mezcla estado con otro chat. La respuesta siempre se envía al JID/teléfono derivado del mensaje
+que disparó el procesamiento.
+
+En **polling**, los mensajes deben traer ``timestamp`` (API Jetson): se ignoran los anteriores al
+arranque del worker para no contestar todo el historial de ``/messages/recent`` al iniciar uvicorn.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +26,7 @@ import re
 import secrets
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from collections.abc import Callable
 from typing import Any
 
@@ -23,6 +41,9 @@ from app.rag_service import RAGService
 logger = logging.getLogger("rag_qc.whatsapp")
 
 _STATUS_OR_BROADCAST = re.compile(r"status@|broadcast", re.I)
+
+# Hora UTC en que arrancó el bucle de polling (una vez por vida del worker). Ver run_whatsapp_poll_loop.
+_WHATSAPP_POLL_STARTED_AT_UTC: datetime | None = None
 
 _DEDUP_LOCK = threading.Lock()
 # /messages/recent repite los mismos IDs en cada poll: LRU sin caducidad temporal corta.
@@ -143,9 +164,10 @@ def _chat_jid_to_e164_phone(chat_jid: str) -> str | None:
     return f"+{d}"
 
 
-def _is_duplicate_message_id(msg_id: str) -> bool:
+def _is_duplicate_message_id(dedup_key: str) -> bool:
+    """True si este mensaje ya se vio en esta conversación. ``dedup_key`` = bucket|id (no global)."""
     now = time.monotonic()
-    key = msg_id.strip()
+    key = dedup_key.strip()
     if not key:
         return True
     with _DEDUP_LOCK:
@@ -163,6 +185,42 @@ def _str_from(v: Any) -> str | None:
     if isinstance(v, str) and v.strip():
         return v.strip()
     return None
+
+
+def _parse_whatsapp_api_timestamp(v: Any) -> datetime | None:
+    """
+    Parsea el ``timestamp`` de la API Flask (:8090), p. ej. ``2026-04-13T00:00:00Z``.
+    Acepta ISO-8601 con Z, offset, entero/float Unix en s o ms.
+    """
+    if v is None:
+        return None
+    if isinstance(v, datetime):
+        dt = v
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    if isinstance(v, (int, float)):
+        x = float(v)
+        if x > 1e12:
+            x /= 1000.0
+        try:
+            return datetime.fromtimestamp(x, tz=timezone.utc)
+        except (OSError, OverflowError, ValueError):
+            return None
+    if not isinstance(v, str):
+        return None
+    s = v.strip()
+    if not s:
+        return None
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 def _coerce_bool(v: Any) -> bool | None:
@@ -243,6 +301,7 @@ def normalize_whatsapp_inbound(m: dict[str, Any]) -> dict[str, Any] | None:
 
     ts = m.get("timestamp")
     ts_s = str(ts).strip() if ts is not None else ""
+    ts_utc = _parse_whatsapp_api_timestamp(ts)
 
     if not mid:
         h = hashlib.sha256(f"{chat_jid}|{ts_s}|{content}".encode("utf-8")).hexdigest()[:24]
@@ -254,11 +313,13 @@ def normalize_whatsapp_inbound(m: dict[str, Any]) -> dict[str, Any] | None:
         "content": content,
         "is_from_me": fm,
         "pushName": push,
+        "timestamp": ts,
+        "timestamp_utc": ts_utc,
     }
 
 
 def parse_recent_messages_payload(data: dict[str, Any]) -> list[dict[str, Any]]:
-    """Extrae lista de mensajes de la respuesta de GET /messages/recent (y variantes)."""
+    """Extrae lista de mensajes de GET /messages/recent o GET /messages?chat_jid=… (y variantes de envoltorio JSON)."""
     candidates: list[Any] = []
 
     results = data.get("results")
@@ -340,7 +401,20 @@ async def process_normalized_whatsapp_message(
     rag: RAGService,
     source: str = "poll",
 ) -> dict[str, Any]:
-    """Procesa un mensaje ya normalizado (dedup, allowlist, RAG, respuesta)."""
+    """Procesa un mensaje ya normalizado (dedup por chat, allowlist, RAG, respuesta)."""
+    msg_id = str(norm.get("id") or "").strip()
+    if not msg_id:
+        return {"ok": False, "error": "missing_id"}
+
+    chat_jid = str(norm.get("chat_jid") or "").strip()
+    if not chat_jid:
+        return {"ok": False, "error": "missing_chat_jid"}
+
+    conv_bucket = _echo_chat_bucket(chat_jid)
+    dedup_key = f"{conv_bucket}|{msg_id}"
+    if _is_duplicate_message_id(dedup_key):
+        return {"ok": True, "ignored": True, "reason": "duplicate"}
+
     if norm.get("is_from_me") is True:
         if not settings.whatsapp_process_from_me:
             logger.info(
@@ -349,17 +423,6 @@ async def process_normalized_whatsapp_message(
                 source,
             )
             return {"ok": True, "ignored": True, "reason": "from_me"}
-
-    msg_id = str(norm.get("id") or "").strip()
-    if not msg_id:
-        return {"ok": False, "error": "missing_id"}
-    dedup_key = f"wa:{msg_id}"
-    if _is_duplicate_message_id(dedup_key):
-        return {"ok": True, "ignored": True, "reason": "duplicate"}
-
-    chat_jid = str(norm.get("chat_jid") or "").strip()
-    if not chat_jid:
-        return {"ok": False, "error": "missing_chat_jid"}
 
     if not settings.whatsapp_reply_in_groups and "@g.us" in chat_jid:
         return {"ok": True, "ignored": True, "reason": "groups_disabled"}
@@ -501,7 +564,20 @@ def parse_chat_jids_from_chats_payload(data: dict[str, Any]) -> list[str]:
 
 def _msg_timestamp_key(m: dict[str, Any]) -> str:
     t = m.get("timestamp")
-    return str(t) if t is not None else ""
+    if t is None:
+        return ""
+    parsed = _parse_whatsapp_api_timestamp(t)
+    if parsed is not None:
+        return f"{parsed.timestamp():.6f}"
+    return str(t)
+
+
+def _poll_message_not_before_threshold(
+    *,
+    started_at_utc: datetime,
+    skew_sec: float,
+) -> datetime:
+    return started_at_utc - timedelta(seconds=float(skew_sec))
 
 
 async def _process_raw_message_items(
@@ -511,13 +587,34 @@ async def _process_raw_message_items(
     rag: RAGService,
     log_keys: bool,
     raw_for_log: dict[str, Any] | None,
+    poll_not_before_utc: datetime | None = None,
+    poll_start_skew_sec: float = 0.0,
 ) -> None:
     if log_keys and raw_for_log is not None:
         logger.debug("WhatsApp polling: claves JSON %s", list(raw_for_log.keys()))
     if not raw_items:
         return
     raw_items = sorted(raw_items, key=_msg_timestamp_key)
+    threshold: datetime | None = None
+    if poll_not_before_utc is not None:
+        threshold = _poll_message_not_before_threshold(
+            started_at_utc=poll_not_before_utc,
+            skew_sec=poll_start_skew_sec,
+        )
+    skipped_stale = 0
+    skipped_no_ts = 0
     for item in raw_items:
+        if threshold is not None:
+            ts_item = _parse_whatsapp_api_timestamp(item.get("timestamp"))
+            if ts_item is None:
+                skipped_no_ts += 1
+                continue
+            if ts_item < threshold:
+                skipped_stale += 1
+                continue
+        if not settings.whatsapp_process_from_me:
+            if _coerce_bool(item.get("is_from_me")) is True:
+                continue
         try:
             norm = normalize_whatsapp_inbound(item)
             if not norm:
@@ -529,17 +626,27 @@ async def _process_raw_message_items(
             logger.exception("WhatsApp polling: fallo HTTP al responder: %s", e)
         except Exception:
             logger.exception("WhatsApp polling: error procesando mensaje")
+    if skipped_stale or skipped_no_ts:
+        logger.debug(
+            "WhatsApp polling: omitidos por ventana de arranque — antiguos=%d sin_timestamp=%d (umbral UTC≈%s)",
+            skipped_stale,
+            skipped_no_ts,
+            threshold.isoformat() if threshold is not None else "n/a",
+        )
 
 
 async def _poll_iteration_recent(settings: Settings, rag: RAGService) -> None:
     raw = await _fetch_recent_raw(settings)
     raw_items = parse_recent_messages_payload(raw)
+    gate = _WHATSAPP_POLL_STARTED_AT_UTC if settings.whatsapp_poll_skip_messages_before_start else None
     await _process_raw_message_items(
         raw_items,
         settings=settings,
         rag=rag,
         log_keys=settings.whatsapp_poll_log_body,
         raw_for_log=raw,
+        poll_not_before_utc=gate,
+        poll_start_skew_sec=settings.whatsapp_poll_start_skew_sec,
     )
 
 
@@ -573,12 +680,15 @@ async def _poll_iteration_chats(settings: Settings, rag: RAGService) -> None:
             continue
         merged.extend(parse_recent_messages_payload(msg_body))
 
+    gate = _WHATSAPP_POLL_STARTED_AT_UTC if settings.whatsapp_poll_skip_messages_before_start else None
     await _process_raw_message_items(
         merged,
         settings=settings,
         rag=rag,
         log_keys=False,
         raw_for_log=None,
+        poll_not_before_utc=gate,
+        poll_start_skew_sec=settings.whatsapp_poll_start_skew_sec,
     )
 
 
@@ -587,6 +697,9 @@ async def run_whatsapp_poll_loop(
     settings_provider: Callable[[], Settings],
     rag_provider: Callable[[], RAGService | None],
 ) -> None:
+    global _WHATSAPP_POLL_STARTED_AT_UTC
+    _WHATSAPP_POLL_STARTED_AT_UTC = datetime.now(timezone.utc)
+
     s0 = settings_provider()
     mode = s0.whatsapp_poll_mode
     base = s0.whatsapp_api_base_url.rstrip("/")
@@ -597,6 +710,11 @@ async def run_whatsapp_poll_loop(
         )
     else:
         logger.info("WhatsApp polling: modo recent → %s/messages/recent", base)
+    if s0.whatsapp_poll_skip_messages_before_start:
+        logger.info(
+            "WhatsApp polling: solo mensajes con timestamp API ≥ arranque − %.0fs (evita bucle con histórico)",
+            s0.whatsapp_poll_start_skew_sec,
+        )
     try:
         while True:
             settings = settings_provider()

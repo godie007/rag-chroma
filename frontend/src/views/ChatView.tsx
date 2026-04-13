@@ -118,7 +118,7 @@ export function ChatView({ config }: { config: ConfigPublic | null }) {
                               <div className="flex justify-between items-center mb-3 gap-2">
                                 <div className="flex flex-wrap items-center gap-2 min-w-0">
                                   <span className="text-[10px] font-bold text-secondary uppercase tracking-tighter shrink-0">
-                                    Fragmento
+                                    Extracto
                                   </span>
                                   <span className="text-[10px] text-on-surface-variant truncate">
                                     • {String(m.sources[selection.sourceIndex].metadata.source ?? 'doc')}
@@ -209,7 +209,7 @@ export function ChatView({ config }: { config: ConfigPublic | null }) {
             </div>
           </div>
           <p className="text-[10px] text-center mt-4 text-on-surface-variant/50 font-medium">
-            Verifica las respuestas con los fragmentos citados cuando proceda.
+            Comprueba las respuestas con el texto de las fuentes cuando proceda.
           </p>
           {config?.whatsapp_webhook_active ? (
             <div className="text-[10px] text-center mt-2 text-on-surface-variant/60 font-medium max-w-xl mx-auto leading-relaxed space-y-1">
