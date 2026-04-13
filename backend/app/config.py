@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any, Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -40,30 +41,43 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     max_upload_bytes: int = 200 * 1024 * 1024
 
-    # Evolution API (WhatsApp): webhook POST /webhooks/evolution. Pon false para apagar por completo.
-    evolution_enabled: bool = True
-    evolution_api_base_url: str = "http://127.0.0.1:8080"
-    evolution_api_key: str = ""
-    evolution_verify_webhook_apikey: bool = True
-    evolution_reply_in_groups: bool = False
-    # true = loguea el JSON completo del webhook (truncado) en cada POST; útil para depurar.
-    evolution_webhook_log_body: bool = False
-    # Solo responder chats 1:1 cuyo JID coincida (dígitos E.164 sin +, separados por coma). Vacío = todos.
-    evolution_allowed_sender_numbers: str = ""
-    # Mientras se ejecuta RAG+LLM, llamar a Evolution sendPresence (composing). Requiere ejecutar el RAG en un thread.
-    evolution_typing_indicator: bool = True
-    # Duración de cada pulso composing (ms). Evolution ≤20 s evita cortes “paused” entre pulsos; se renueva en bucle hasta terminar.
-    evolution_typing_pulse_ms: int = Field(default=20_000, ge=3_000, le=20_000)
+    # WhatsApp: API Flask :8090 (GOWA Docker :3000 en Jetson). Envío: POST /send/text (phone + message).
+    # Recepción: polling recent | chats, y/o POST …/webhooks/whatsapp (p. ej. desde whatsapp_receiver.sh).
+    whatsapp_enabled: bool = False
+    whatsapp_api_base_url: str = "http://192.168.1.254:8090"
+    whatsapp_poll_enabled: bool = True
+    # recent = GET /messages/recent?limit=… | chats = GET /chats + GET /messages?chat_jid=… por chat
+    whatsapp_poll_mode: Literal["recent", "chats"] = "recent"
+    whatsapp_poll_interval_sec: float = Field(default=4.0, ge=0.5, le=120.0)
+    whatsapp_poll_limit: int = Field(default=50, ge=5, le=200)
+    whatsapp_chats_poll_limit: int = Field(default=25, ge=1, le=100)
+    whatsapp_messages_per_chat_limit: int = Field(default=40, ge=5, le=200)
+    whatsapp_api_key: str = ""
+    whatsapp_webhook_secret: str = ""
+    whatsapp_reply_in_groups: bool = False
+    whatsapp_poll_log_body: bool = False
+    whatsapp_allowed_sender_numbers: str = ""
+    # true = procesa también is_from_me (mensajes salientes vistos por GOWA). Necesario si escribes desde el mismo
+    # número/WhatsApp que está en el Jetson; en producción puede re-encolar respuestas largas del bot → usar heurística.
+    whatsapp_process_from_me: bool = False
+    whatsapp_from_me_max_question_chars: int = Field(default=4000, ge=500, le=32000)
 
-    @field_validator("evolution_api_key", mode="after")
+    @field_validator("whatsapp_poll_mode", mode="before")
     @classmethod
-    def strip_evolution_api_key(cls, v: str) -> str:
-        """Quita espacios y BOM (UTF-8) que suelen colarse al copiar desde .env."""
+    def coerce_whatsapp_poll_mode(cls, v: Any) -> str:
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return "recent"
+        s = str(v).strip().lower()
+        return s if s in ("recent", "chats") else "recent"
+
+    @field_validator("whatsapp_api_key", "whatsapp_webhook_secret", mode="after")
+    @classmethod
+    def strip_whatsapp_secrets(cls, v: str) -> str:
         return v.strip().strip("\ufeff").strip()
 
-    @field_validator("evolution_allowed_sender_numbers", mode="after")
+    @field_validator("whatsapp_allowed_sender_numbers", mode="after")
     @classmethod
-    def strip_evolution_allowed_senders(cls, v: str) -> str:
+    def strip_whatsapp_allowed_senders(cls, v: str) -> str:
         return v.strip().strip("\ufeff").strip()
 
     @field_validator("openai_chat_model", "openai_embedding_model", mode="after")

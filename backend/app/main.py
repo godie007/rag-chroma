@@ -1,9 +1,10 @@
+import asyncio
 import json
 import logging
 import time
 from contextlib import asynccontextmanager
+from typing import Any
 
-import httpx
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -12,17 +13,18 @@ from app.config import Settings
 from app.conversation_commands import is_new_chat_command, new_chat_acknowledgement
 from app.paths import resolve_eval_jsonl_path
 from app.preprocess import load_document_bytes, sanitize_chunk_text, strip_pdf_glyph_tokens
-from app.evolution_webhook import (
-    extract_webhook_api_key,
-    handle_evolution_payload,
-    verify_evolution_webhook_credential,
-)
 from app.rag_service import RAGService
+from app.whatsapp_poll import (
+    process_raw_whatsapp_inbound_dict,
+    run_whatsapp_poll_loop,
+    verify_whatsapp_webhook_request,
+)
 
 logger = logging.getLogger("rag_qc")
 
 _settings: Settings | None = None
 _rag: RAGService | None = None
+_whatsapp_poll_task: asyncio.Task[None] | None = None
 
 
 def get_settings() -> Settings:
@@ -50,7 +52,8 @@ async def lifespan(app: FastAPI):
         force=True,
     )
     logging.getLogger("rag_qc").setLevel(logging.INFO)
-    logging.getLogger("rag_qc.evolution").setLevel(logging.INFO)
+    logging.getLogger("rag_qc.whatsapp").setLevel(logging.INFO)
+    global _whatsapp_poll_task
     _settings = Settings()
     if _settings.openai_api_key.strip():
         try:
@@ -62,7 +65,45 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("OPENAI_API_KEY vacía: /ingest y /chat no estarán disponibles")
         _rag = None
+    if _settings.whatsapp_enabled and _rag is not None:
+        if _settings.whatsapp_poll_enabled:
+            _whatsapp_poll_task = asyncio.create_task(
+                run_whatsapp_poll_loop(settings_provider=get_settings, rag_provider=lambda: _rag),
+                name="whatsapp-poll",
+            )
+            if _settings.whatsapp_poll_mode == "chats":
+                logger.info(
+                    "WhatsApp polling (chats) → %s/chats + /messages?chat_jid=… cada %.1f s (GOWA :3000, API :8090)",
+                    _settings.whatsapp_api_base_url.rstrip("/"),
+                    _settings.whatsapp_poll_interval_sec,
+                )
+            else:
+                logger.info(
+                    "WhatsApp polling (recent) → %s/messages/recent cada %.1f s (GOWA :3000, API :8090)",
+                    _settings.whatsapp_api_base_url.rstrip("/"),
+                    _settings.whatsapp_poll_interval_sec,
+                )
+        else:
+            logger.info(
+                "WhatsApp: polling desactivado (WHATSAPP_POLL_ENABLED=false); recepción solo por POST /webhooks/whatsapp",
+            )
+        if _settings.whatsapp_webhook_secret.strip():
+            logger.info("WhatsApp webhook protegido: cabecera X-WhatsApp-Webhook-Secret o Authorization: Bearer …")
+        if _settings.whatsapp_process_from_me:
+            logger.info(
+                "WhatsApp: WHATSAPP_PROCESS_FROM_ME=true (se procesan mensajes salientes/sync; textos from_me > %d chars se ignoran)",
+                _settings.whatsapp_from_me_max_question_chars,
+            )
+    elif _settings.whatsapp_enabled and _rag is None:
+        logger.warning("WHATSAPP_ENABLED=true pero RAG no disponible: no hay polling ni webhook útil hasta configurar OPENAI_API_KEY")
     yield
+    if _whatsapp_poll_task is not None:
+        _whatsapp_poll_task.cancel()
+        try:
+            await _whatsapp_poll_task
+        except asyncio.CancelledError:
+            pass
+        _whatsapp_poll_task = None
     _rag = None
     _settings = None
 
@@ -129,9 +170,11 @@ class ConfigPublic(BaseModel):
     retrieve_max_l2_distance: float
     retrieve_relevance_margin: float
     retrieve_elbow_l2_gap: float
-    evolution_webhook_enabled: bool
-    evolution_api_base_url: str
-    evolution_reply_in_groups: bool
+    whatsapp_polling_active: bool
+    whatsapp_webhook_active: bool
+    whatsapp_poll_mode: str
+    whatsapp_api_base_url: str
+    whatsapp_poll_interval_sec: float
 
 
 @app.get("/health")
@@ -154,7 +197,8 @@ def stats():
 @app.get("/config", response_model=ConfigPublic)
 def public_config():
     s = get_settings()
-    evo_ready = bool(s.evolution_enabled and s.evolution_api_key.strip())
+    wa_ok = bool(s.whatsapp_enabled and _rag is not None)
+    wa_poll = bool(wa_ok and s.whatsapp_poll_enabled)
     return ConfigPublic(
         openai_chat_temperature=s.openai_chat_temperature,
         openai_chat_max_output_tokens=s.openai_chat_max_output_tokens,
@@ -170,9 +214,11 @@ def public_config():
         retrieve_max_l2_distance=s.retrieve_max_l2_distance,
         retrieve_relevance_margin=s.retrieve_relevance_margin,
         retrieve_elbow_l2_gap=s.retrieve_elbow_l2_gap,
-        evolution_webhook_enabled=evo_ready,
-        evolution_api_base_url=s.evolution_api_base_url,
-        evolution_reply_in_groups=s.evolution_reply_in_groups,
+        whatsapp_polling_active=wa_poll,
+        whatsapp_webhook_active=wa_ok,
+        whatsapp_poll_mode=s.whatsapp_poll_mode,
+        whatsapp_api_base_url=s.whatsapp_api_base_url,
+        whatsapp_poll_interval_sec=s.whatsapp_poll_interval_sec,
     )
 
 
@@ -241,109 +287,69 @@ def ingest_reset():
     )
 
 
-@app.get("/webhooks/evolution")
-def evolution_webhook_ping():
-    """Comprueba que el backend es alcanzable desde Evolution (GET). El webhook real es POST."""
+def _whatsapp_webhook_body_items(body: Any) -> list[dict[str, Any]]:
+    if isinstance(body, list):
+        return [x for x in body if isinstance(x, dict)]
+    if isinstance(body, dict):
+        for k in ("messages", "data"):
+            v = body.get(k)
+            if isinstance(v, list) and v:
+                return [x for x in v if isinstance(x, dict)]
+        res = body.get("results")
+        if isinstance(res, dict):
+            v = res.get("data")
+            if isinstance(v, list):
+                return [x for x in v if isinstance(x, dict)]
+        return [body]
+    return []
+
+
+@app.get("/webhooks/whatsapp")
+def whatsapp_webhook_ping():
+    """
+    GOWA (:3000) → API Flask (:8090). Puedes reenviar desde whatsapp_api.py o whatsapp_receiver.sh con POST aquí.
+    Alternativa: el backend hace polling a /messages/recent o modo /chats + /messages por chat.
+    """
     return {
         "ok": True,
-        "path": "/webhooks/evolution",
-        "method": "Usa POST desde Evolution; este GET solo verifica red/firewall.",
+        "post": "JSON con un mensaje o lista / data / messages (mismo criterio que normalize_whatsapp_inbound).",
+        "upstream_ports": {"gowa_docker": 3000, "whatsapp_api_flask": 8090},
+        "jetson_scripts": ["whatsapp_api.py", "whatsapp_receiver.sh"],
     }
 
 
-async def _evolution_webhook_impl(request: Request) -> dict:
-    """POST a /webhooks/evolution o /webhooks/evolution/<sufijo> (WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS)."""
-    peer = request.client.host if request.client else "?"
-    logger.info("Evolution webhook: POST recibido (cliente=%s)", peer)
+@app.post("/webhooks/whatsapp")
+async def whatsapp_webhook(request: Request):
     settings = get_settings()
-    if not settings.evolution_enabled:
-        logger.warning("Evolution webhook: rechazado 503 — EVOLUTION_ENABLED=false")
-        raise HTTPException(status_code=503, detail="Integración Evolution desactivada (EVOLUTION_ENABLED=false)")
-    if not settings.evolution_api_key.strip():
-        logger.warning("Evolution webhook: rechazado 503 — falta EVOLUTION_API_KEY")
+    if not settings.whatsapp_enabled:
+        raise HTTPException(status_code=503, detail="WHATSAPP_ENABLED=false")
+    if not verify_whatsapp_webhook_request(request, settings):
         raise HTTPException(
-            status_code=503,
-            detail="Falta EVOLUTION_API_KEY en backend/.env (misma clave que AUTHENTICATION_API_KEY en Evolution)",
+            status_code=401,
+            detail=(
+                "Webhook no autorizado. Define WHATSAPP_WEBHOOK_SECRET en el backend y envía "
+                "X-WhatsApp-Webhook-Secret: <secreto> o Authorization: Bearer <secreto>"
+            ),
         )
+    rag = require_rag()
     raw_bytes = await request.body()
     if not raw_bytes.strip():
-        logger.warning("Evolution webhook: cuerpo vacío")
         raise HTTPException(status_code=400, detail="Cuerpo vacío")
     try:
         body = json.loads(raw_bytes)
     except json.JSONDecodeError:
-        logger.warning(
-            "Evolution webhook: JSON inválido (primeros 400 bytes): %r",
-            raw_bytes[:400],
-        )
         raise HTTPException(status_code=400, detail="JSON inválido") from None
-    if not isinstance(body, dict):
-        raise HTTPException(status_code=400, detail="El cuerpo debe ser un objeto JSON")
 
-    logger.info(
-        "Evolution webhook: cuerpo parseado event=%r instance=%r",
-        body.get("event"),
-        body.get("instance"),
-    )
+    items = _whatsapp_webhook_body_items(body)
+    if not items:
+        return {"ok": True, "processed": 0, "detail": "Sin objetos de mensaje reconocibles"}
 
-    if settings.evolution_api_key.strip() and settings.evolution_verify_webhook_apikey:
-        got = extract_webhook_api_key(request, body)
-        inst = body.get("instance")
-        ok = await verify_evolution_webhook_credential(got, inst if isinstance(inst, str) else None, settings=settings)
-        if not ok:
-            logger.warning(
-                "Evolution webhook 401: credencial inválida o ausente "
-                "(header apikey: %s; cuerpo trae apikey/apiKey: %s). "
-                "Evolution suele enviar el token de la instancia, no AUTHENTICATION_API_KEY; "
-                "o apikey null si AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES=false.",
-                "sí" if request.headers.get("apikey") or request.headers.get("Apikey") else "no",
-                "sí" if body.get("apikey") is not None or body.get("apiKey") is not None else "no",
-            )
-            raise HTTPException(
-                status_code=401,
-                detail=(
-                    "Credencial del webhook inválida o ausente. Debe ser EVOLUTION_API_KEY (global) o el token "
-                    "de la instancia (hash). Requiere EVOLUTION_API_KEY=AUTHENTICATION_API_KEY y "
-                    "EVOLUTION_API_BASE_URL alcanzable para validar el token. Si no hay apikey en el JSON, "
-                    "activa AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES=true en Evolution o pon "
-                    "EVOLUTION_VERIFY_WEBHOOK_APIKEY=false (menos seguro)."
-                ),
-            )
-
-    err = body.get("error") if isinstance(body.get("error"), str) else None
-    if err:
-        return {"ok": True, "ignored": True, "reason": "evolution_error_event", "detail": err}
-
-    rag = require_rag()
-    try:
-        out = await handle_evolution_payload(body, settings=settings, rag=rag)
-        if out.get("replied"):
-            if out.get("reason") == "new_chat_command":
-                logger.info("Evolution webhook: comando /nuevo — conversación reiniciada (mensaje al remitente)")
-            else:
-                logger.info("Evolution webhook: respuesta RAG enviada por WhatsApp")
-        elif out.get("ignored"):
-            logger.info("Evolution webhook: sin respuesta automática — %s", out.get("reason"))
-        return out
-    except httpx.HTTPError as e:
-        logger.exception("Error HTTP contra Evolution API: %s", e)
-        raise HTTPException(
-            status_code=502,
-            detail=f"No se pudo enviar la respuesta por WhatsApp (Evolution): {e!s}",
-        ) from e
-
-
-@app.post("/webhooks/evolution")
-async def evolution_webhook(request: Request):
-    """Recibe eventos globales de Evolution (p. ej. messages.upsert) y responde con el RAG."""
-    return await _evolution_webhook_impl(request)
-
-
-@app.post("/webhooks/evolution/{rest:path}")
-async def evolution_webhook_by_event_suffix(request: Request, rest: str):
-    """Misma lógica que POST /webhooks/evolution cuando WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS=true (p. ej. …/chats-update)."""
-    _ = rest
-    return await _evolution_webhook_impl(request)
+    results: list[dict[str, Any]] = []
+    for item in items:
+        out = await process_raw_whatsapp_inbound_dict(item, settings=settings, rag=rag, source="webhook")
+        results.append(out)
+    logger.info("WhatsApp webhook: procesados %d objeto(s)", len(results))
+    return {"ok": True, "count": len(results), "results": results}
 
 
 @app.post("/chat", response_model=ChatResponse)

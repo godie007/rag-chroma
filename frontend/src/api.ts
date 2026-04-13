@@ -103,9 +103,11 @@ export type ConfigPublic = {
   retrieve_max_l2_distance: number
   retrieve_relevance_margin: number
   retrieve_elbow_l2_gap: number
-  evolution_webhook_enabled: boolean
-  evolution_api_base_url: string
-  evolution_reply_in_groups: boolean
+  whatsapp_polling_active: boolean
+  whatsapp_webhook_active: boolean
+  whatsapp_poll_mode: 'recent' | 'chats'
+  whatsapp_api_base_url: string
+  whatsapp_poll_interval_sec: number
 }
 
 export async function fetchStats(): Promise<StatsResponse> {

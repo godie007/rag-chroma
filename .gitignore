@@ -4,8 +4,6 @@
 backend/.env
 evals/.env
 frontend/.env
-infra/evolution/.env
-
 backend/.venv/
 evals/.venv/
 __pycache__/

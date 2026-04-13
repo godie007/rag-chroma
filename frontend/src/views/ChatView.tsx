@@ -52,49 +52,10 @@ export function ChatView({ config }: { config: ConfigPublic | null }) {
     }
   }, [input, loading])
 
-  const webhookUrl = `${getApiBase()}/webhooks/evolution`
-  const evo = config
-    ? {
-        on: config.evolution_webhook_enabled,
-        api: config.evolution_api_base_url,
-        groups: config.evolution_reply_in_groups,
-      }
-    : null
-
   return (
     <div className="flex flex-1 flex-col min-h-0">
       <main className="flex-1 overflow-y-auto bg-surface-bright flex flex-col items-center min-h-0">
         <div className="w-full max-w-[44rem] px-6 py-10 md:py-12 space-y-10">
-          {evo && (
-            <div
-              className={`rounded-xl border px-4 py-3 text-sm ${
-                evo.on
-                  ? 'border-secondary/30 bg-secondary-container/10 text-on-surface'
-                  : 'border-amber-500/40 bg-amber-500/10 text-on-surface'
-              }`}
-            >
-              <p className="font-semibold text-on-surface mb-1">WhatsApp (Evolution API)</p>
-              {evo.on ? (
-                <p className="text-on-surface-variant leading-relaxed">
-                  El webhook está activo: los mensajes de texto entrantes se responden con el mismo RAG que este
-                  chat. API Evolution:{' '}
-                  <code className="text-xs bg-surface-container-high px-1.5 py-0.5 rounded">{evo.api}</code>
-                  {evo.groups ? ' · Respuestas en grupos: sí' : ' · Grupos: no (solo chats 1:1)'}
-                </p>
-              ) : (
-                <p className="text-on-surface-variant leading-relaxed">
-                  Configura <code className="text-xs bg-surface-container-high px-1.5 py-0.5 rounded">EVOLUTION_ENABLED=true</code> y{' '}
-                  <code className="text-xs bg-surface-container-high px-1.5 py-0.5 rounded">EVOLUTION_API_KEY</code>{' '}
-                  en <code className="text-xs">backend/.env</code> (igual que{' '}
-                  <code className="text-xs">AUTHENTICATION_API_KEY</code> en Evolution) y reinicia el backend.
-                </p>
-              )}
-              <p className="mt-2 text-xs text-on-surface-variant break-all">
-                URL del webhook para Evolution:{' '}
-                <code className="bg-surface-container-high px-1.5 py-0.5 rounded">{webhookUrl}</code>
-              </p>
-            </div>
-          )}
           {turns.length === 0 && (
             <p className="text-center text-sm text-on-surface-variant">
               Haz una pregunta sobre los documentos indexados.
@@ -250,6 +211,31 @@ export function ChatView({ config }: { config: ConfigPublic | null }) {
           <p className="text-[10px] text-center mt-4 text-on-surface-variant/50 font-medium">
             Verifica las respuestas con los fragmentos citados cuando proceda.
           </p>
+          {config?.whatsapp_webhook_active ? (
+            <div className="text-[10px] text-center mt-2 text-on-surface-variant/60 font-medium max-w-xl mx-auto leading-relaxed space-y-1">
+              {config.whatsapp_polling_active ? (
+                <p>
+                  WhatsApp: polling ({config.whatsapp_poll_mode}) a{' '}
+                  <span className="text-on-surface-variant">{config.whatsapp_api_base_url}</span>
+                  {config.whatsapp_poll_mode === 'chats'
+                    ? ' → /chats + /messages?chat_jid=…'
+                    : ' → /messages/recent'}
+                  {' '}
+                  cada {config.whatsapp_poll_interval_sec}s → RAG →{' '}
+                  <code className="text-[9px] bg-surface-container-high px-1 rounded">POST /send/text</code>{' '}
+                  (API :8090; GOWA :3000).
+                </p>
+              ) : (
+                <p>WhatsApp: sin polling; recepción vía POST al webhook de abajo (API Flask puede reenviar desde GOWA).</p>
+              )}
+              <p>
+                Webhook RAG:{' '}
+                <code className="text-[9px] bg-surface-container-high px-1 rounded break-all">
+                  {getApiBase()}/webhooks/whatsapp
+                </code>
+              </p>
+            </div>
+          ) : null}
         </div>
       </footer>
     </div>

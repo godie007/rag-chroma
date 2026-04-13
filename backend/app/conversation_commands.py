@@ -1,4 +1,4 @@
-"""Comandos de conversación (mismo criterio en /chat y en WhatsApp via Evolution)."""
+"""Comandos de conversación (mismo criterio en /chat y en WhatsApp por polling)."""
 
 # Solo este texto (tras strip), sin más palabras.
 NEW_CHAT_COMMAND = "/nuevo"
