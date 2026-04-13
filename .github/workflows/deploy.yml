@@ -1,0 +1,47 @@
+name: Deploy to Jetson
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Stop existing services
+        run: |
+          sudo systemctl stop rag-backend || true
+          sudo systemctl stop rag-frontend || true
+
+      - name: Deploy Backend
+        run: |
+          cd $GITHUB_WORKSPACE/backend
+          if [ -d "chroma_db" ]; then
+            rm -rf chroma_db
+          fi
+          cp .env.example .env
+          pip3 install -r requirements.txt --break-system-packages
+          sudo cp rag-backend.service /etc/systemd/system/
+          sudo systemctl daemon-reload
+          sudo systemctl enable rag-backend
+          sudo systemctl restart rag-backend
+
+      - name: Deploy Frontend
+        run: |
+          cd $GITHUB_WORKSPACE/frontend
+          cp .env.example .env
+          npm install
+          npm run build
+          sudo cp rag-frontend.service /etc/systemd/system/
+          sudo systemctl daemon-reload
+          sudo systemctl enable rag-frontend
+          sudo systemctl restart rag-frontend
