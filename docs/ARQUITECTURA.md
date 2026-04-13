@@ -320,4 +320,227 @@ Vite solo expone al bundle variables que empiezan por `VITE_`.
 
 ---
 
-*Última revisión: integración WhatsApp (`whatsapp_poll.py`), webhooks, diagrama de red Jetson y tono de respuestas en `prompts.py`; alineado con `backend/app` y `frontend/src`.*
+---
+
+## 12. Arquitectura de Despliegue con GitHub Actions (Self-Hosted Runner)
+
+### 12.1 Vista General del Sistema
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        NVIDIA JETSON NANO                              │
+│                    (192.168.1.254 - ARM64)                            │
+│  ┌─────────────────────────────────────────────────────────────────┐            │
+│  │              Self-Hosted Runner (GitHub Actions)              │            │
+│  │         ~/actions-runner ( jetson-runner-2 )              │            │
+│  └─────────────────────────────────────────────────────────────────┘            │
+│                              │                                         │
+│         ┌────────────────────┼────────────────────┐                       │
+│         │                    │                    │                       │
+│         ▼                    ▼                    ▼                       │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐                │
+│  │   Backend  │    │  Frontend  │    │  WhatsApp   │                │
+│  │FastAPI    │    │  React    │    │  Bridge    │                │
+│  │:3333      │    │  :4444    │    │  :8090     │                │
+│  └─────────────┘    └─────────────┘    └─────────────┘                │
+│         │                    │                    │                       │
+│         └────────────────────┼────────────────────┘                       │
+│                            │                                         │
+│                            ▼                                         │
+│                   ┌─────────────────┐                               │
+│                   │  Chroma Vector  │                               │
+│                   │     Store       │                               │
+│                   └─────────────────┘                               │
+└─────────────────────────────────────────────────────────────────────────────┘
+         ▲
+         │
+         │ Internet
+         │
+┌────────┴────────┐
+│   GitHub Repo    │
+│  codla.git    │
+│  main branch  │
+└────────┬────────┘
+         │
+         │ push
+         ▼
+┌─────────────────────┐
+│ GitHub Actions      │
+│ deploy.yml        │
+│ (self-hosted)    │
+└─────────────────────┘
+```
+
+### 12.2 Componentes del Deployment
+
+| Componente | Ubicación | Puerto | Descripción |
+|------------|-----------|--------|------------|
+| **GitHub Actions** | cloud.github.com | - | Orchestrates deployment on push to `main` |
+| **Self-Hosted Runner** | Jetson Nano | - | Executes jobs locally (ARM64) |
+| **Backend FastAPI** | `/home/jetson/codla/backend` | 3333 | RAG API with Chroma |
+| **Frontend React** | `/home/jetson/codla/frontend` | 4444 | Web UI |
+| **WhatsApp Bridge** | Jetson :8090 | 8090 | Flask API for GOWA |
+| **Chroma DB** | `/home/jetson/codla/backend/chroma_db` | - | Vector embeddings storage |
+
+### 12.3 Flujo de Deployment
+
+```mermaid
+sequenceDiagram
+    participant Dev as Desarrollador
+    participant GH as GitHub
+    participant GA as GitHub Actions
+    participant Runner as Self-Hosted Runner
+    participant Jetson as Jetson Nano
+
+    Dev->>GH: git push origin main
+    GH->>GA: Trigger workflow
+    GA->>Runner: Assign job to self-hosted
+    Runner->>Jetson: Execute deploy.yml
+    rect rgb(0, 255, 0)
+        Runner->>Jetson: mkdir -p /home/jetson/codla
+        Runner->>Jetson: cp backend to codla/
+        Runner->>Jetson: pip3 install requirements.txt
+        Runner->>Jetson: cp rag-backend.service
+        Runner->>Jetson: systemctl restart rag-backend
+    end
+    rect rgb(0, 255, 0)
+        Runner->>Jetson: cp frontend to codla/
+        Runner->>Jetson: npm install
+        Runner->>Jetson: cp rag-frontend.service
+        Runner->>Jetson: systemctl restart rag-frontend
+    end
+    Runner-->>GA: Job completed
+    GA-->>Dev: Status notification
+```
+
+### 12.4 Configuración del Runner
+
+**Una sola vez (en Jetson):**
+
+```bash
+# 1. Crear directorio
+mkdir -p ~/actions-runner && cd ~/actions-runner
+
+# 2. Descargar runner ARM64
+curl -o actions-runner-linux-arm64.tar.gz -L \
+  https://github.com/actions/runner/releases/download/v2.333.1/actions-runner-linux-arm64-2.333.1.tar.gz
+tar xzf actions-runner-linux-arm64.tar.gz
+
+# 3. Configurar con token
+./config.sh --url https://github.com/godie007/codla --token <TOKEN> --name jetson-runner-2 --unattended
+
+# 4. Ejecutar
+./run.sh
+```
+
+**Como servicio systemd:**
+
+```bash
+sudo ./svc.sh install
+sudo ./svc.sh start
+```
+
+### 12.5 Workflow de Deployment
+
+```yaml
+# .github/workflows/deploy.yml
+name: Deploy to Jetson
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: self-hosted  # → Jetson Nano
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy Backend
+        run: |
+          mkdir -p /home/jetson/codla
+          rm -rf /home/jetson/codla/backend
+          cp -r $GITHUB_WORKSPACE/backend /home/jetson/codla/
+          cd /home/jetson/codla/backend
+          pip3 install -r requirements.txt || pip3 install uvicorn fastapi langchain chromadb openai
+
+      - name: Deploy Frontend
+        run: |
+          mkdir -p /home/jetson/codla
+          rm -rf /home/jetson/codla/frontend
+          cp -r $GITHUB_WORKSPACE/frontend /home/jetson/codla/
+          cd /home/jetson/codla/frontend
+          npm install
+```
+
+### 12.6 Servicios Systemd
+
+**Backend service** (`/etc/systemd/system/rag-backend.service`):
+
+```ini
+[Unit]
+Description=RAG Backend Service
+After=network.target
+
+[Service]
+User=jetson
+WorkingDirectory=/home/jetson/codla/backend
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+ExecStart=/usr/bin/python3 -m uvicorn app.main:app --host 0.0.0.0 --port 3333
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**Frontend service** (`/etc/systemd/system/rag-frontend.service`):
+
+```ini
+[Unit]
+Description=RAG Frontend Service
+After=network.target
+
+[Service]
+User=jetson
+WorkingDirectory=/home/jetson/codla/frontend
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+Environment="NODE_ENV=production"
+ExecStart=/usr/bin/npm run dev -- --host 0.0.0.0 --port 4444
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### 12.7 Gestión del Runner
+
+```bash
+# Ver estado
+systemctl status actions.runner.godie007-codla.jetson-runner
+
+# Reiniciar
+sudo systemctl restart actions.runner.godie007-codla.jetson-runner
+
+# Ver logs
+tail -f ~/runner.log
+
+# Detener
+sudo systemctl stop actions.runner.godie007-codla.jetson-runner
+```
+
+### 12.8 Notas de Producción
+
+1. **Espacio en disco**: La Jetson Nano tiene ~29GB (SD). Mantener al menos 1GB libre para logs y operaciones.
+2. **Token**: Generar nuevo token en Repo > Settings > Actions > Runners > New self-hosted runner.
+3. **Actualizaciones**: Si el runner no recibe jobs, verificar que esté corriendo y conectado.
+4. **Errores comunes**:
+   - `No space left on device`: Limpiar `/tmp`, `_work`, `_diag`
+   - `pip3: No module named uvicorn`: Instalar dependencias explícitamente
+
+---
+
+*Última revisión: integración WhatsApp, deployment con GitHub Actions en Jetson Nano, workflow actualizado con manejo de errores y servicios systemd.*

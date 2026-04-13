@@ -1,0 +1,47 @@
+# Python 3.8 / Jetson (aarch64) y pip antiguos: el requirements.txt principal usa
+# numpy 2.x, anyio 4.13+, chromadb 1.5+ y openai 2.x, que requieren Python >= 3.9 o
+# ruedas que no existen en este entorno.
+#
+# Instalación en el dispositivo:
+#   pip3 install -r requirements-jetson.txt
+#
+# Si tienes Python 3.10+ como `python3`, usa en su lugar:
+#   pip3 install -r requirements.txt
+#
+# POST /evaluate (RAGAS) no está incluido aquí por dependencias pesadas; añade
+# manualmente ragas y datasets si lo necesitas en el edge.
+
+anyio==4.4.0
+annotated-doc==0.0.4
+annotated-types==0.7.0
+certifi>=2024.0.0
+charset-normalizer>=3.0.0
+chromadb==0.5.23
+click>=8.1.0
+fastapi==0.115.6
+grpcio>=1.50.0,<2
+h11==0.14.0
+httpx==0.27.2
+idna>=3.0
+langchain-chroma==0.1.4
+langchain-community==0.2.17
+langchain-core==0.2.43
+langchain-openai==0.2.14
+langchain-text-splitters==0.2.4
+numpy==1.24.4
+openai==1.54.5
+pydantic==2.10.5
+pydantic-settings==2.7.1
+pypdf==5.1.0
+PyMuPDF==1.24.11
+python-dotenv==1.0.1
+python-multipart==0.0.9
+PyYAML>=6.0
+requests>=2.28.0
+sniffio>=1.3.0
+starlette==0.41.3
+tenacity>=8.2.0
+tiktoken==0.7.0
+typing_extensions>=4.8.0
+urllib3>=1.26.0,<3
+uvicorn[standard]==0.32.1

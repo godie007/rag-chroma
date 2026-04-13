@@ -6,8 +6,12 @@ from typing import Any
 from uuid import uuid4
 
 import numpy as np
-from langchain_chroma.vectorstores import maximal_marginal_relevance
 from langchain_core.documents import Document
+
+try:
+    from langchain_chroma.vectorstores import maximal_marginal_relevance
+except ImportError:
+    from langchain_community.vectorstores.utils import maximal_marginal_relevance
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
