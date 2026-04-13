@@ -273,7 +273,7 @@ Definidas en `backend/app/config.py` (Pydantic Settings). Los nombres en **MAYÚ
 | `RETRIEVE_MAX_L2_DISTANCE` | `retrieve_max_l2_distance` | `1.3` | Umbral L2 de Chroma: por encima se descarta el candidato. |
 | `RETRIEVE_RELEVANCE_MARGIN` | `retrieve_relevance_margin` | `0.10` | Solo se mantienen fragmentos con distancia ≤ mejor + margen (con ajuste si `best_d ≥ 0.75`). |
 | `RETRIEVE_ELBOW_L2_GAP` | `retrieve_elbow_l2_gap` | `0.0` | Si > 0, corta la lista cuando el salto L2 entre vecinos ordenados supera este valor. |
-| `CORS_ORIGINS` | `cors_origins` | `http://localhost:5173,...` | Orígenes permitidos, separados por coma. |
+| `CORS_ORIGINS` | `cors_origins` | `http://localhost:4444,...` | Orígenes permitidos, separados por coma. |
 | `MAX_UPLOAD_BYTES` | `max_upload_bytes` | `209715200` (~200 MiB) | Tamaño máximo por archivo en `POST /ingest`. |
 | `LLM_RETRIEVAL_PROFILE` | `llm_retrieval_profile` | `true` | Mini-llamada LLM para decidir recuperación amplia vs normal. |
 
@@ -285,7 +285,7 @@ Definidas en `backend/app/config.py` (Pydantic Settings). Los nombres en **MAYÚ
 
 | Variable | Descripción |
 |----------|-------------|
-| `VITE_API_BASE_URL` | URL base del API FastAPI (sin barra final). Por defecto en código: `http://127.0.0.1:8000`. |
+| `VITE_API_BASE_URL` | URL base del API FastAPI (sin barra final). Por defecto en código: `http://127.0.0.1:3333`. |
 
 Vite solo expone al bundle variables que empiezan por `VITE_`.
 

@@ -78,7 +78,7 @@ cp .env.example .env
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload --host 0.0.0.0 --port 3333
 ```
 
 También puedes usar `chmod +x run_dev.sh && ./run_dev.sh` desde `backend/`.
@@ -98,10 +98,11 @@ La **UI** incluye la sección «Evaluación RAGAS» que llama a `POST /evaluate`
 ```bash
 cd frontend
 cp .env.example .env
-# Opcional: VITE_API_BASE_URL si el API no está en 127.0.0.1:8000
+# Opcional: VITE_API_BASE_URL si el API no está en 127.0.0.1:3333
 
 npm install
 npm run dev
+# UI en http://localhost:4444 (Vite)
 ```
 
 Coloca tus PDF/MD/TXT en `data/` (ver `data/README.md`), súbelos desde la UI y pregunta en el chat.
@@ -122,7 +123,7 @@ RAGAS ya forma parte de `requirements.txt`; usa el mismo entorno del backend (`O
 Ejemplo por HTTP:
 
 ```bash
-curl -s -X POST "http://127.0.0.1:8000/evaluate?eval_relative_path=evals/sample_eval.jsonl"
+curl -s -X POST "http://127.0.0.1:3333/evaluate?eval_relative_path=evals/sample_eval.jsonl"
 ```
 
 ## Estructura

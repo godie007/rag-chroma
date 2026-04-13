@@ -111,7 +111,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="RAG Control de Calidad", lifespan=lifespan)
 
 _cors = Settings()
-_origins = [o.strip() for o in _cors.cors_origins.split(",") if o.strip()] or ["http://localhost:5173"]
+_origins = [o.strip() for o in _cors.cors_origins.split(",") if o.strip()] or [
+    "http://localhost:4444",
+    "http://127.0.0.1:4444",
+]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,

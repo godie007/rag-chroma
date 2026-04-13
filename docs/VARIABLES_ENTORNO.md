@@ -52,7 +52,7 @@ Todas se cargan vía Pydantic Settings (`app.config.Settings`). Los nombres en e
 
 | Variable | Valor ejemplo | Definición | Razón del valor por defecto |
 |----------|---------------|------------|------------------------------|
-| `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Orígenes del navegador permitidos para llamar al API, separados por coma. | Coincide con **Vite por defecto** (puerto 5173) con host `localhost` o `127.0.0.1`. Añade tu dominio en despliegue real. |
+| `CORS_ORIGINS` | `http://localhost:4444,http://127.0.0.1:4444` | Orígenes del navegador permitidos para llamar al API, separados por coma. | Coincide con **Vite** en este repo (puerto **4444**) con host `localhost` o `127.0.0.1`. Añade tu dominio en despliegue real. |
 | `MAX_UPLOAD_BYTES` | `209715200` | Tamaño máximo **por archivo** en `POST /ingest` (bytes). | ~**200 MiB**: admite PDFs de libro completo sin rechazo 413 frecuente. Sube el valor si tus manuales son mayores (valor en bytes, p. ej. `524288000` ≈ 500 MiB). |
 
 ### Reglas prácticas
@@ -96,7 +96,7 @@ Solo las variables con prefijo **`VITE_`** llegan al código del navegador.
 
 | Variable | Valor ejemplo | Definición | Razón del valor por defecto |
 |----------|---------------|------------|------------------------------|
-| `VITE_API_BASE_URL` | `http://127.0.0.1:8000` | URL base del backend FastAPI **sin barra final**. | Misma máquina y puertos por defecto del README (backend en 8000). En producción sustituye por la URL pública del API. Si no se define, el código suele usar el mismo host por defecto embebido en `api.ts`. |
+| `VITE_API_BASE_URL` | `http://127.0.0.1:3333` | URL base del backend FastAPI **sin barra final**. | Misma máquina y puertos por defecto del README (backend en **3333**). En producción sustituye por la URL pública del API. Si no se define, el código usa el valor por defecto embebido en `frontend/src/api.ts`. |
 
 **Seguridad:** nunca pongas `OPENAI_API_KEY` ni secretos en el frontend; solo esta URL pública del backend.
 

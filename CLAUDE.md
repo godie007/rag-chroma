@@ -30,15 +30,15 @@ cd backend && chmod +x run_dev.sh && ./run_dev.sh
 
 # Option 2: manually
 cd backend && source .venv/bin/activate
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload --host 0.0.0.0 --port 3333
 ```
 
-Server runs at `http://127.0.0.1:8000` with auto-reload enabled.
+Server runs at `http://127.0.0.1:3333` with auto-reload enabled.
 
 **Evaluation (RAGAS):**
 ```bash
 # Tras pip install -r requirements.txt, POST /evaluate (UI o curl; tarda varios minutos)
-curl -X POST "http://127.0.0.1:8000/evaluate?eval_relative_path=evals/sample_eval.jsonl"
+curl -X POST "http://127.0.0.1:3333/evaluate?eval_relative_path=evals/sample_eval.jsonl"
 ```
 
 ### Frontend (React + Vite + TypeScript)
@@ -47,7 +47,7 @@ curl -X POST "http://127.0.0.1:8000/evaluate?eval_relative_path=evals/sample_eva
 ```bash
 cd frontend
 cp .env.example .env
-# Optional: set VITE_API_BASE_URL if backend is not at 127.0.0.1:8000
+# Optional: set VITE_API_BASE_URL if backend is not at 127.0.0.1:3333
 
 npm install
 ```
@@ -57,7 +57,7 @@ npm install
 npm run dev
 ```
 
-Development server runs at `http://localhost:5173` with HMR enabled.
+Development server runs at `http://localhost:4444` with HMR enabled.
 
 **Build:**
 ```bash
@@ -147,7 +147,7 @@ Typical edge setup: **GOWA** (Docker) on port **3000** and **Flask API** on **80
 - Responsive layout with dark/light mode support
 
 **Configuration:**
-- API base URL via `VITE_API_BASE_URL` env var (defaults to `http://127.0.0.1:8000`)
+- API base URL via `VITE_API_BASE_URL` env var (defaults to `http://127.0.0.1:3333`)
 
 ### Data Flow
 
@@ -180,7 +180,7 @@ Typical edge setup: **GOWA** (Docker) on port **3000** and **Flask API** on **80
 
 ## Key Considerations
 
-- **Environment variables are mandatory:** Backend will not initialize without `OPENAI_API_KEY`. Frontend fallback is `http://localhost:5173` if `VITE_API_BASE_URL` is not set.
+- **Environment variables are mandatory:** Backend will not initialize without `OPENAI_API_KEY`. Frontend API default is `http://127.0.0.1:3333` if `VITE_API_BASE_URL` is not set.
 - **Chroma persistence:** Vector DB is persisted on disk in the directory specified by `CHROMA_PERSIST_DIRECTORY` (defaults to `backend/chroma_db`). Clearing requires calling `POST /ingest/reset`.
 - **Chunking params affect indexing:** Changing `CHUNK_SIZE` or `CHUNK_OVERLAP` requires calling `POST /ingest/reset` and re-uploading documents to regenerate embeddings. Changes to `TOP_K` or MMR params only require restarting the backend.
 - **Large PDFs:** The default PDF-GenAI-Challenge.pdf is ~600+ pages. Default chunk size is 1280 with 20% overlap to handle this gracefully. Adjust `CHUNK_SIZE`, `TOP_K`, `MMR_FETCH_K` if needed.

@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     retrieve_elbow_l2_gap: float = 0.0
     # Si es False, no se llama al LLM antes de recuperar (siempre perfil "normal"; ahorra coste/latencia).
     llm_retrieval_profile: bool = True
-    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    cors_origins: str = "http://localhost:4444,http://127.0.0.1:4444"
     max_upload_bytes: int = 200 * 1024 * 1024
 
     # WhatsApp: API Flask :8090 (GOWA Docker :3000 en Jetson). Envío: POST /send/text (phone + message).
