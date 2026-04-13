@@ -24,7 +24,10 @@ jobs:
 
       - name: Deploy Backend
         run: |
-          cd $GITHUB_WORKSPACE/backend
+          mkdir -p /home/jetson/codla
+          rm -rf /home/jetson/codla/backend
+          cp -r $GITHUB_WORKSPACE/backend /home/jetson/codla/
+          cd /home/jetson/codla/backend
           rm -rf chroma_db
           cp .env.example .env
           pip3 install -r requirements.txt --no-deps || true
@@ -35,7 +38,10 @@ jobs:
 
       - name: Deploy Frontend
         run: |
-          cd $GITHUB_WORKSPACE/frontend
+          mkdir -p /home/jetson/codla
+          rm -rf /home/jetson/codla/frontend
+          cp -r $GITHUB_WORKSPACE/frontend /home/jetson/codla/
+          cd /home/jetson/codla/frontend
           cp .env.example .env
           npm install || true
           sudo cp rag-frontend.service /etc/systemd/system/

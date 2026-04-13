@@ -126,19 +126,124 @@ Ejemplo por HTTP:
 curl -s -X POST "http://127.0.0.1:3333/evaluate?eval_relative_path=evals/sample_eval.jsonl"
 ```
 
+## Despliegue con GitHub Actions (Self-Hosted Runner)
+
+### Arquitectura del Sistema
+
+```
+┌─────────────────┐     ┌─────────────────────┐
+│   GitHub Repo    │────▶│  GitHub Actions     │
+│   (codla.git)   │     │  Workflow: deploy  │
+└─────────────────┘     └──────────┬──────────┘
+                                  │
+                         ┌────────▼──────────┐
+                         │ Self-Hosted Runner │
+                         │  (NVIDIA Jetson    │
+                         │   Nano - ARM64)    │
+                         └────────┬──────────┘
+                                  │
+         ┌───────────────────────┼───────────────────────┐
+         │                       │                       │
+         ▼                       ▼                       ▼
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│  FastAPI Backend│    │  React Frontend │    │   WhatsApp      │
+│  (Port 3333)    │    │  (Port 4444)     │    │  Integration    │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         └───────────────────────┼───────────────────────┘
+                                 │
+                                 ▼
+                    ┌─────────────────────────────┐
+                    │  Chroma Vector Store        │
+                    │  (Embeddings + RAG)        │
+                    └─────────────────────────────┘
+```
+
+### Componentes
+
+| Componente | Ubicación | Descripción |
+|------------|-----------|------------|
+| **GitHub Actions** | cloud | Orquesta el deployment en push a `main` |
+| **Self-Hosted Runner** | Jetson Nano (192.168.1.254) | Ejecuta los jobs localmente |
+| **Backend (FastAPI)** | Jetson :3333 | API RAG con Chroma |
+| **Frontend (React)** | Jetson :4444 | UI web |
+| **WhatsApp Bridge** | Jetson :8090 | Integración con GOWA |
+
+### Configuración del Runner
+
+El runner se ejecuta en la NVIDIA Jetson Nano:
+
+```bash
+# En la Jetson (una sola vez)
+mkdir -p ~/actions-runner && cd ~/actions-runner
+curl -o actions-runner-linux-arm64.tar.gz -L \
+  https://github.com/actions/runner/releases/download/v2.333.1/actions-runner-linux-arm64-2.333.1.tar.gz
+tar xzf actions-runner-linux-arm64.tar.gz
+./config.sh --url https://github.com/godie007/codla --token <TOKEN>
+./run.sh
+
+# O como servicio systemd
+sudo ./svc.sh install && sudo ./svc.sh start
+```
+
+### Workflow de Deployment
+
+```yaml
+# .github/workflows/deploy.yml
+name: Deploy to Jetson
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: self-hosted  # → Jetson Nano
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy Backend
+        run: |
+          cd $GITHUB_WORKSPACE/backend
+          pip3 install -r requirements.txt --no-deps
+
+      - name: Deploy Frontend
+        run: |
+          cd $GITHUB_WORKSPACE/frontend
+          npm install
+```
+
+### Flujo de Deployment
+
+1. **Push a `main`** → GitHub Actions dispara workflow
+2. **Runner en Jetson** recibe el job
+3. **Checkout** del código en `_work/codla/`
+4. **Instalación** de dependencias (backend + frontend)
+5. **Inicio de servicios** via systemd
+
 ## Estructura
 
 ```
 pruebaScanntech/
+├── .github/
+│   └── workflows/
+│       └── deploy.yml      # Workflow de deployment
 ├── backend/
-│   └── app/
-│       ├── main.py, config.py, rag_service.py, preprocess.py, paths.py, evaluation.py
-│       ├── prompts.py          # instrucciones LLM (SYSTEM_RAG, SYSTEM_NO_RETRIEVAL, tono usuario)
-│       ├── whatsapp_poll.py    # integración WhatsApp (polling + eco de respuestas + webhook)
-│       └── persistence/        # Chroma en disco (ChromaStore)
-├── docs/             # ARQUITECTURA.md, VARIABLES_ENTORNO.md, images/ (capturas de la UI)
-├── frontend/         # React (Vite)
-├── evals/            # sample_eval.jsonl + README
-├── data/             # Documentos a indexar (vacío salvo README)
+│   ├── app/
+│   │   ├── main.py, config.py, rag_service.py, preprocess.py, paths.py, evaluation.py
+│   │   ├── prompts.py          # instrucciones LLM
+│   │   ├── whatsapp_poll.py   # integración WhatsApp
+│   │   └── persistence/       # Chroma
+│   ├── rag-backend.service    # Servicio systemd
+│   └── requirements.txt
+├── frontend/
+│   ├── src/                  # React + Vite
+│   ├── rag-frontend.service  # Servicio systemd
+│   └── package.json
+├── scripts/
+│   └── install-runner.sh     # Script instalación runner
+├── docs/                     # Documentación
+├── evals/                    # Evaluación RAGAS
 └── README.md
 ```
