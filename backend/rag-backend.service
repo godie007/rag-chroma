@@ -5,8 +5,8 @@ After=network.target
 [Service]
 User=jetson
 WorkingDirectory=/home/jetson/codla/backend
-Environment="PATH=/home/jetson/.local/bin:/usr/local/bin:/usr/bin:/bin"
-ExecStart=/home/jetson/.local/bin/python3 -m uvicorn app.main:app --host 0.0.0.0 --port 3333
+Environment="PATH=/usr/local/bin:/usr/bin:/bin:/home/jetson/.local/bin"
+ExecStart=/usr/bin/python3 -m uvicorn app.main:app --host 0.0.0.0 --port 3333
 Restart=always
 RestartSec=10
 
