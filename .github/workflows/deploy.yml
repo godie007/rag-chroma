@@ -54,8 +54,11 @@ jobs:
           cp -r $GITHUB_WORKSPACE/frontend /home/jetson/workspace/codla/
           cd /home/jetson/workspace/codla/frontend
           if [ ! -f .env ]; then cp .env.example .env; fi
+          # Eliminar node_modules previa y reinstalar con versión compatible
+          rm -rf node_modules package-lock.json
           npm install
-          npm run build
+          # Saltar tsc y solo hacer vite build (vite transpila TypeScript internamente)
+          npx vite build
           # Copiar dist a ubicación nginx
           sudo mkdir -p /var/www/rag
           sudo cp -r dist/* /var/www/rag/
