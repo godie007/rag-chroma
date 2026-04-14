@@ -47,14 +47,19 @@ jobs:
           cp $GITHUB_WORKSPACE/scripts/start-backend.sh /home/jetson/workspace/codla/backend/
           chmod +x /home/jetson/workspace/codla/backend/start-backend.sh
 
-      - name: Deploy Frontend (Static Files)
+      - name: Deploy Frontend (Build & Copy to Nginx)
         run: |
           mkdir -p /home/jetson/workspace/codla
           rm -rf /home/jetson/workspace/codla/frontend
           cp -r $GITHUB_WORKSPACE/frontend /home/jetson/workspace/codla/
           cd /home/jetson/workspace/codla/frontend
           if [ ! -f .env ]; then cp .env.example .env; fi
-          rm -rf node_modules
+          npm install
+          npm run build
+          # Copiar dist a ubicación nginx
+          sudo mkdir -p /var/www/rag
+          sudo cp -r dist/* /var/www/rag/
+          sudo chown -R www-data:www-data /var/www/rag
 
       - name: Configure Nginx
         run: |
