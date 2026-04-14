@@ -36,7 +36,8 @@ jobs:
           .venv/bin/pip install --no-cache-dir langchain-core langchain-text-splitters langchain-openai
           .venv/bin/pip install --no-cache-dir pypdf PyMuPDF
           .venv/bin/pip install --no-cache-dir --no-deps chromadb langchain-chroma langchain-community
-          .venv/bin/pip install --no-cache-dir ragas
+          # Opcional: ragas solo si se necesita evaluación (muy pesado, ~500MB extra)
+          # .venv/bin/pip install --no-cache-dir ragas
           cp $GITHUB_WORKSPACE/scripts/start-backend.sh /home/jetson/workspace/codla/backend/
           chmod +x /home/jetson/workspace/codla/backend/start-backend.sh
 
