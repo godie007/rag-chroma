@@ -58,7 +58,7 @@ jobs:
           rm -rf node_modules package-lock.json
           npm install
           # Saltar tsc y solo hacer vite build (vite transpila TypeScript internamente)
-          npx vite build
+          npm run build
           # Copiar dist a ubicación nginx
           sudo mkdir -p /var/www/rag
           sudo cp -r dist/* /var/www/rag/
