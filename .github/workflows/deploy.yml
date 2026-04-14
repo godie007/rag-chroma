@@ -12,6 +12,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Clean up disk space
+        run: |
+          sudo rm -rf /home/jetson/workspace/codla 2>/dev/null || true
+          sudo rm -rf /tmp/* 2>/dev/null || true
+          sudo rm -rf /root/.cache 2>/dev/null || true
+          sudo pip cache purge 2>/dev/null || true
+          df -h
+
       - name: Stop existing services
         run: |
           sudo pkill -f "uvicorn app.main:app" || true
