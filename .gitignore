@@ -14,6 +14,5 @@ backend/chroma_db/
 chroma_db/
 
 frontend/node_modules/
-frontend/dist/
 
 evals/results/*.json

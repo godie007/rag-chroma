@@ -14,10 +14,10 @@ jobs:
 
       - name: Stop existing services
         run: |
-          sudo systemctl stop rag-backend || true
-          sudo systemctl stop rag-frontend || true
           sudo pkill -f "uvicorn app.main:app" || true
           sudo pkill -f "vite" || true
+          sudo systemctl stop rag-backend 2>/dev/null || true
+          sudo systemctl stop rag-frontend 2>/dev/null || true
 
       - name: Deploy Backend
         run: |
@@ -36,21 +36,17 @@ jobs:
           .venv/bin/pip install --no-cache-dir langchain-core langchain-text-splitters langchain-openai
           .venv/bin/pip install --no-cache-dir pypdf PyMuPDF
           .venv/bin/pip install --no-cache-dir --no-deps chromadb langchain-chroma langchain-community
-          # Opcional: ragas solo si se necesita evaluación (muy pesado, ~500MB extra)
-          # .venv/bin/pip install --no-cache-dir ragas
           cp $GITHUB_WORKSPACE/scripts/start-backend.sh /home/jetson/workspace/codla/backend/
           chmod +x /home/jetson/workspace/codla/backend/start-backend.sh
 
-      - name: Deploy Frontend (Production Build)
+      - name: Deploy Frontend (Static Files)
         run: |
           mkdir -p /home/jetson/workspace/codla
           rm -rf /home/jetson/workspace/codla/frontend
           cp -r $GITHUB_WORKSPACE/frontend /home/jetson/workspace/codla/
           cd /home/jetson/workspace/codla/frontend
           if [ ! -f .env ]; then cp .env.example .env; fi
-          # Usar vite preview para evitar build con typescript incompatible en Jetson
-          npm install
-          PORT=4444 nohup npm run dev -- --host 0.0.0.0 > /tmp/frontend.log 2 &
+          rm -rf node_modules
 
       - name: Configure Nginx
         run: |
