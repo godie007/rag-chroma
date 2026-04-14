@@ -48,8 +48,9 @@ jobs:
           cp -r $GITHUB_WORKSPACE/frontend /home/jetson/workspace/codla/
           cd /home/jetson/workspace/codla/frontend
           if [ ! -f .env ]; then cp .env.example .env; fi
+          # Usar vite preview para evitar build con typescript incompatible en Jetson
           npm install
-          npm run build
+          PORT=4444 nohup npm run dev -- --host 0.0.0.0 > /tmp/frontend.log 2 &
 
       - name: Configure Nginx
         run: |
