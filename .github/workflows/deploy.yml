@@ -47,21 +47,15 @@ jobs:
           cp $GITHUB_WORKSPACE/scripts/start-backend.sh /home/jetson/workspace/codla/backend/
           chmod +x /home/jetson/workspace/codla/backend/start-backend.sh
 
-      - name: Deploy Frontend (Build & Copy to Nginx)
+      - name: Deploy Frontend (Copy pre-built dist to Nginx)
         run: |
           mkdir -p /home/jetson/workspace/codla
           rm -rf /home/jetson/workspace/codla/frontend
           cp -r $GITHUB_WORKSPACE/frontend /home/jetson/workspace/codla/
           cd /home/jetson/workspace/codla/frontend
           if [ ! -f .env ]; then cp .env.example .env; fi
-          # Eliminar node_modules previa y reinstalar con versión compatible
-          rm -rf node_modules package-lock.json
-          npm install
-          # Forzar versión de vite compatible con Node.js del Jetson
-          rm -rf node_modules package-lock.json
-          npm install vite@4.4.0 @vitejs/plugin-react@4.0.0
-          npm run build
-          # Copiar dist a ubicación nginx
+          rm -rf node_modules
+          # Copiar dist pre-built a nginx
           sudo mkdir -p /var/www/rag
           sudo cp -r dist/* /var/www/rag/
           sudo chown -R www-data:www-data /var/www/rag
