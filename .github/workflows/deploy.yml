@@ -57,7 +57,9 @@ jobs:
           # Eliminar node_modules previa y reinstalar con versión compatible
           rm -rf node_modules package-lock.json
           npm install
-          # Saltar tsc y solo hacer vite build (vite transpila TypeScript internamente)
+          # Forzar versión de vite compatible con Node.js del Jetson
+          rm -rf node_modules package-lock.json
+          npm install
           npm run build
           # Copiar dist a ubicación nginx
           sudo mkdir -p /var/www/rag
