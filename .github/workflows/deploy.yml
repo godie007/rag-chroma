@@ -59,7 +59,7 @@ jobs:
           npm install
           # Forzar versión de vite compatible con Node.js del Jetson
           rm -rf node_modules package-lock.json
-          npm install
+          npm install vite@4.4.0 @vitejs/plugin-react@4.0.0
           npm run build
           # Copiar dist a ubicación nginx
           sudo mkdir -p /var/www/rag
