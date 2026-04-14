@@ -1,0 +1,16 @@
+uvicorn
+fastapi
+pydantic
+pydantic-settings
+python-dotenv
+python-multipart
+httpx
+requests
+numpy
+openai
+tiktoken
+langchain-core
+langchain-text-splitters
+pypdf
+PyMuPDF
+chromadb

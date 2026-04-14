@@ -12,15 +12,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
       - name: Stop existing services
         run: |
           sudo systemctl stop rag-backend || true
           sudo systemctl stop rag-frontend || true
+          sudo pkill -f "uvicorn app.main:app" || true
+          sudo pkill -f "vite" || true
 
       - name: Deploy Backend
         run: |
@@ -29,29 +26,41 @@ jobs:
           cp -r $GITHUB_WORKSPACE/backend /home/jetson/workspace/codla/
           cd /home/jetson/workspace/codla/backend
           rm -rf chroma_db
-          cp .env.example .env
-          pip3 install --upgrade pip setuptools wheel
-          pip3 install --no-cache-dir uvicorn fastapi pydantic pydantic-settings python-dotenv python-multipart || true
-          pip3 install --no-cache-dir httpx requests charset-normalizer certifi idna urllib3 sniffio || true
-          pip3 install --no-cache-dir numpy || true
-          pip3 install --no-cache-dir openai==1.12.0 tiktoken || true
-          pip3 install --no-cache-dir langchain-core langchain-text-splitters langchain-openai || true
-          pip3 install --no-cache-dir pypdf PyMuPDF || true
-          pip3 install --no-cache-dir --no-deps chromadb langchain-chroma langchain-community || true
-          sudo cp rag-backend.service /etc/systemd/system/
-          sudo systemctl daemon-reload || true
-          sudo systemctl enable rag-backend || true
-          sudo systemctl restart rag-backend || true
+          if [ ! -f .env ]; then cp .env.example .env; fi
+          python3 -m venv .venv
+          .venv/bin/pip install --upgrade pip setuptools wheel
+          .venv/bin/pip install --no-cache-dir uvicorn fastapi pydantic pydantic-settings python-dotenv python-multipart
+          .venv/bin/pip install --no-cache-dir httpx requests charset-normalizer certifi idna urllib3 sniffio
+          .venv/bin/pip install --no-cache-dir numpy
+          .venv/bin/pip install --no-cache-dir openai==1.12.0 tiktoken
+          .venv/bin/pip install --no-cache-dir langchain-core langchain-text-splitters langchain-openai
+          .venv/bin/pip install --no-cache-dir pypdf PyMuPDF
+          .venv/bin/pip install --no-cache-dir --no-deps chromadb langchain-chroma langchain-community
+          .venv/bin/pip install --no-cache-dir ragas
+          cp $GITHUB_WORKSPACE/scripts/start-backend.sh /home/jetson/workspace/codla/backend/
+          chmod +x /home/jetson/workspace/codla/backend/start-backend.sh
 
-      - name: Deploy Frontend
+      - name: Deploy Frontend (Production Build)
         run: |
           mkdir -p /home/jetson/workspace/codla
           rm -rf /home/jetson/workspace/codla/frontend
           cp -r $GITHUB_WORKSPACE/frontend /home/jetson/workspace/codla/
           cd /home/jetson/workspace/codla/frontend
-          cp .env.example .env
-          npm install || true
-          sudo cp rag-frontend.service /etc/systemd/system/
-          sudo systemctl daemon-reload || true
-          sudo systemctl enable rag-frontend || true
-          sudo systemctl restart rag-frontend || true
+          if [ ! -f .env ]; then cp .env.example .env; fi
+          npm install
+          npm run build
+
+      - name: Configure Nginx
+        run: |
+          sudo cp $GITHUB_WORKSPACE/scripts/nginx-rag.conf /etc/nginx/sites-available/rag
+          sudo cp /etc/nginx/sites-available/rag /etc/nginx/sites-enabled/rag
+          sudo rm -f /etc/nginx/sites-enabled/default
+          sudo nginx -t
+          sudo systemctl restart nginx
+
+      - name: Start Backend Service
+        run: |
+          cd /home/jetson/workspace/codla/backend
+          nohup /home/jetson/workspace/codla/backend/start-backend.sh > /tmp/rag-backend.log 2>&1 &
+          sleep 3
+          curl -s http://127.0.0.1:3333/health || echo "Backend not responding yet"

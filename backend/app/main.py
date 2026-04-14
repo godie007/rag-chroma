@@ -9,10 +9,16 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+# RAG Service for quality control - v2 with Nginx
+
 from app.config import Settings
 from app.conversation_commands import is_new_chat_command, new_chat_acknowledgement
 from app.paths import resolve_eval_jsonl_path
-from app.preprocess import load_document_bytes, sanitize_chunk_text, strip_pdf_glyph_tokens
+from app.preprocess import (
+    load_document_bytes,
+    sanitize_chunk_text,
+    strip_pdf_glyph_tokens,
+)
 from app.rag_service import RAGService
 from app.whatsapp_poll import (
     process_raw_whatsapp_inbound_dict,
@@ -58,7 +64,9 @@ async def lifespan(app: FastAPI):
     if _settings.openai_api_key.strip():
         try:
             _rag = RAGService(_settings)
-            logger.info("RAG inicializado (Chroma en %s)", _settings.chroma_persist_directory)
+            logger.info(
+                "RAG inicializado (Chroma en %s)", _settings.chroma_persist_directory
+            )
         except Exception as e:
             logger.exception("No se pudo inicializar RAG: %s", e)
             _rag = None
@@ -68,7 +76,9 @@ async def lifespan(app: FastAPI):
     if _settings.whatsapp_enabled and _rag is not None:
         if _settings.whatsapp_poll_enabled:
             _whatsapp_poll_task = asyncio.create_task(
-                run_whatsapp_poll_loop(settings_provider=get_settings, rag_provider=lambda: _rag),
+                run_whatsapp_poll_loop(
+                    settings_provider=get_settings, rag_provider=lambda: _rag
+                ),
                 name="whatsapp-poll",
             )
             if _settings.whatsapp_poll_mode == "chats":
@@ -88,14 +98,18 @@ async def lifespan(app: FastAPI):
                 "WhatsApp: polling desactivado (WHATSAPP_POLL_ENABLED=false); recepción solo por POST /webhooks/whatsapp",
             )
         if _settings.whatsapp_webhook_secret.strip():
-            logger.info("WhatsApp webhook protegido: cabecera X-WhatsApp-Webhook-Secret o Authorization: Bearer …")
+            logger.info(
+                "WhatsApp webhook protegido: cabecera X-WhatsApp-Webhook-Secret o Authorization: Bearer …"
+            )
         if _settings.whatsapp_process_from_me:
             logger.info(
                 "WhatsApp: WHATSAPP_PROCESS_FROM_ME=true (se procesan mensajes salientes/sync; textos from_me > %d chars se ignoran)",
                 _settings.whatsapp_from_me_max_question_chars,
             )
     elif _settings.whatsapp_enabled and _rag is None:
-        logger.warning("WHATSAPP_ENABLED=true pero RAG no disponible: no hay polling ni webhook útil hasta configurar OPENAI_API_KEY")
+        logger.warning(
+            "WHATSAPP_ENABLED=true pero RAG no disponible: no hay polling ni webhook útil hasta configurar OPENAI_API_KEY"
+        )
     yield
     if _whatsapp_poll_task is not None:
         _whatsapp_poll_task.cancel()
@@ -204,7 +218,9 @@ def health():
 def stats():
     s = get_settings()
     if _rag is None:
-        return StatsResponse(ready=False, chunk_count=0, collection=s.chroma_collection_name)
+        return StatsResponse(
+            ready=False, chunk_count=0, collection=s.chroma_collection_name
+        )
     return StatsResponse(
         ready=True,
         chunk_count=_rag.collection_chunk_count(),
@@ -251,7 +267,9 @@ def public_config():
 async def ingest(files: list[UploadFile] = File(...)):
     settings = get_settings()
     if not settings.openai_api_key.strip():
-        raise HTTPException(status_code=401, detail="Falta OPENAI_API_KEY en el servidor")
+        raise HTTPException(
+            status_code=401, detail="Falta OPENAI_API_KEY en el servidor"
+        )
     rag = require_rag()
     total_chunks = 0
     processed = 0
@@ -384,11 +402,17 @@ async def whatsapp_webhook(request: Request):
 
     items = _whatsapp_webhook_body_items(body)
     if not items:
-        return {"ok": True, "processed": 0, "detail": "Sin objetos de mensaje reconocibles"}
+        return {
+            "ok": True,
+            "processed": 0,
+            "detail": "Sin objetos de mensaje reconocibles",
+        }
 
     results: list[dict[str, Any]] = []
     for item in items:
-        out = await process_raw_whatsapp_inbound_dict(item, settings=settings, rag=rag, source="webhook")
+        out = await process_raw_whatsapp_inbound_dict(
+            item, settings=settings, rag=rag, source="webhook"
+        )
         results.append(out)
     logger.info("WhatsApp webhook: procesados %d objeto(s)", len(results))
     return {"ok": True, "count": len(results), "results": results}
@@ -405,7 +429,8 @@ def chat(body: ChatRequest):
     return ChatResponse(
         answer=answer_out,
         sources=[
-            SourceOut(content=sanitize_chunk_text(s.content), metadata=s.metadata) for s in used
+            SourceOut(content=sanitize_chunk_text(s.content), metadata=s.metadata)
+            for s in used
         ],
     )
 
@@ -433,14 +458,18 @@ async def evaluate_ragas(eval_relative_path: str | None = None):
 
     settings = get_settings()
     if not settings.openai_api_key.strip():
-        raise HTTPException(status_code=401, detail="Falta OPENAI_API_KEY en el servidor")
+        raise HTTPException(
+            status_code=401, detail="Falta OPENAI_API_KEY en el servidor"
+        )
     rag = require_rag()
     try:
         eval_path = resolve_eval_jsonl_path(eval_relative_path)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     if not eval_path.is_file():
-        raise HTTPException(status_code=404, detail=f"No existe el archivo de evaluación: {eval_path}")
+        raise HTTPException(
+            status_code=404, detail=f"No existe el archivo de evaluación: {eval_path}"
+        )
 
     try:
         return await run_ragas_evaluation_async(rag, settings, eval_path)
@@ -450,4 +479,6 @@ async def evaluate_ragas(eval_relative_path: str | None = None):
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.exception("Fallo evaluación RAGAS: %s", e)
-        raise HTTPException(status_code=500, detail=f"Error en evaluación RAGAS: {e!s}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Error en evaluación RAGAS: {e!s}"
+        ) from e
