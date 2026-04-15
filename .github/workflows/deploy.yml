@@ -57,7 +57,7 @@ jobs:
           rm -rf node_modules
           # Copiar dist pre-built a nginx
           sudo mkdir -p /var/www/rag
-          sudo cp -r dist/* /var/www/rag/
+          sudo cp -R dist/. /var/www/rag/
           sudo chown -R www-data:www-data /var/www/rag
 
       - name: Configure Nginx
