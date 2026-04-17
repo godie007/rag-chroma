@@ -34,7 +34,11 @@ jobs:
           cp -r $GITHUB_WORKSPACE/backend /home/jetson/workspace/codla/
           cd /home/jetson/workspace/codla/backend
           rm -rf chroma_db
-          if [ ! -f .env ]; then cp .env.example .env; fi
+          if [ ! -f .env ]; then 
+            cp .env.example .env; 
+            # Agregar una API key dummy para que el backend pueda iniciar
+            echo "OPENAI_API_KEY=sk-dummy-key-for-testing" >> .env
+          fi
           python3 -m venv .venv
           .venv/bin/pip install --upgrade pip setuptools wheel
           .venv/bin/pip install --no-cache-dir uvicorn fastapi pydantic pydantic-settings python-dotenv python-multipart
@@ -47,15 +51,19 @@ jobs:
           cp $GITHUB_WORKSPACE/scripts/start-backend.sh /home/jetson/workspace/codla/backend/
           chmod +x /home/jetson/workspace/codla/backend/start-backend.sh
 
+      - name: Build Frontend for production
+        run: |
+          cd $GITHUB_WORKSPACE/frontend
+          npm install
+          npm run build
+
       - name: Deploy Frontend (Copy pre-built dist to Nginx)
         run: |
           mkdir -p /home/jetson/workspace/codla
           rm -rf /home/jetson/workspace/codla/frontend
-          cp -r $GITHUB_WORKSPACE/frontend /home/jetson/workspace/codla/
-          cd /home/jetson/workspace/codla/frontend
+          cd $GITHUB_WORKSPACE/frontend
           if [ ! -f .env ]; then cp .env.example .env; fi
-          rm -rf node_modules
-          # Copiar dist pre-built a nginx
+          # Copiar dist a nginx
           sudo mkdir -p /var/www/rag
           sudo cp -R dist/. /var/www/rag/
           sudo chown -R www-data:www-data /var/www/rag
@@ -72,5 +80,13 @@ jobs:
         run: |
           cd /home/jetson/workspace/codla/backend
           nohup /home/jetson/workspace/codla/backend/start-backend.sh > /tmp/rag-backend.log 2>&1 &
-          sleep 3
-          curl -s http://127.0.0.1:3333/health || echo "Backend not responding yet"
+          sleep 5
+          echo "=== Backend log ==="
+          cat /tmp/rag-backend.log
+          echo "=== Health check ==="
+          curl -s http://127.0.0.1:3333/health
+          echo ""
+          echo "=== Nginx status ==="
+          sudo systemctl status nginx --no-pager || true
+          echo "=== Test proxy ==="
+          curl -s -H "Host: 192.168.1.254" http://127.0.0.1/api/health || curl -s http://localhost/api/health || echo "Proxy not working"
