@@ -19,15 +19,30 @@ async def catch_all(path: str, request: Request):
     if path == "health":
         return {"status": "ok", "ready": False}
     if path == "config":
-        return {"note": "RAG mode", "chunk_size": 1280, "top_k": 3}
+        return {
+            "chunk_size": 1280,
+            "top_k": 3,
+            "mmr_lambda": 0.5,
+            "whatsapp_enabled": False,
+        }
     if path == "stats":
         return {"chunks": 0, "ready": False, "sources": []}
     if path == "api/health":
         return {"status": "ok", "ready": False}
     if path == "api/config":
-        return {"note": "RAG mode", "chunk_size": 1280, "top_k": 3}
+        return {
+            "chunk_size": 1280,
+            "top_k": 3,
+            "mmr_lambda": 0.5,
+            "whatsapp_enabled": False,
+        }
     if path == "api/stats":
         return {"chunks": 0, "ready": False, "sources": []}
+    if path == "api/chat":
+        return {
+            "answer": "RAG backend not configured. Please upload documents.",
+            "sources": [],
+        }
     return {"detail": f"Path not found: {path}"}
 
 
