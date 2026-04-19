@@ -39,13 +39,28 @@ jobs:
             echo "OPENAI_API_KEY=sk-dummy" >> .env
           fi
 
-      - name: Configure and start Nginx
+      - name: Clean old services
         run: |
-          sudo cp "$GITHUB_WORKSPACE/scripts/nginx-rag.conf" /etc/nginx/sites-available/rag
+          sudo systemctl stop codla-frontend 2>/dev/null || true
+          sudo systemctl stop codla-backend 2>/dev/null || true
+          sudo systemctl disable codla-frontend 2>/dev/null || true
+          sudo systemctl disable codla-backend 2>/dev/null || true
+          sudo rm -f /etc/systemd/system/codla-* 2>/dev/null || true
+          sudo systemctl daemon-reload 2>/dev/null || true
+          echo "Old services cleaned"
+
+      - name: Configure Nginx
+        run: |
+          echo "Configuring nginx..."
+          # Copy config
+          cp "$GITHUB_WORKSPACE/scripts/nginx-rag.conf" /tmp/nginx-rag.conf
+          sudo cp /tmp/nginx-rag.conf /etc/nginx/sites-available/rag
           sudo ln -sf /etc/nginx/sites-available/rag /etc/nginx/sites-enabled/rag
           sudo rm -f /etc/nginx/sites-enabled/default
           sudo nginx -t
-          sudo systemctl restart nginx
+          # Reload nginx - it is already running
+          sudo nginx -s reload 2>/dev/null || echo "nginx reload skipped"
+          echo "Done"
 
       - name: Start Backend
         run: |
