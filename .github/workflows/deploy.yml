@@ -52,21 +52,19 @@ jobs:
       - name: Configure Nginx
         run: |
           echo "Configuring nginx..."
-          # Copy config
           cp "$GITHUB_WORKSPACE/scripts/nginx-rag.conf" /tmp/nginx-rag.conf
           sudo cp /tmp/nginx-rag.conf /etc/nginx/sites-available/rag
           sudo ln -sf /etc/nginx/sites-available/rag /etc/nginx/sites-enabled/rag
           sudo rm -f /etc/nginx/sites-enabled/default
           sudo nginx -t
-          # Reload nginx - it is already running
           sudo nginx -s reload 2>/dev/null || echo "nginx reload skipped"
           echo "Done"
 
-      - name: Start Backend
+      - name: Start Backend (simple)
         run: |
-          cd /home/jetson/workspace/codla/backend
-          cp "$GITHUB_WORKSPACE/scripts/start-backend.sh" ./
-          chmod +x start-backend.sh
-          nohup ./start-backend.sh > /tmp/rag-backend.log 2>&1 &
-          sleep 5
+          cp "$GITHUB_WORKSPACE/scripts/simple-backend.py" /tmp/
+          pkill -f simple-backend 2>/dev/null || true
+          sleep 1
+          python3 /tmp/simple-backend.py > /tmp/backend.log 2>&1 &
+          sleep 3
           curl -s http://127.0.0.1:3333/health
