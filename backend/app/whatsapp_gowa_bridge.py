@@ -30,6 +30,10 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger("rag_qc.whatsapp_bridge")
 
+# GOWA resuelve rutas como /chat/5731...@s.whatsapp.net/messages con @ literal; si se codifica
+# como %40, responde "chat … not found" y el agregado /messages/recent queda vacío.
+_GOWA_JID_IN_PATH_SAFE = "@"
+
 GOWA_BASE = os.environ.get("GOWA_UPSTREAM_URL", "http://127.0.0.1:3000").rstrip("/")
 BRIDGE_KEY = os.environ.get("WHATSAPP_BRIDGE_API_KEY", "").strip()
 GOWA_DEVICE_ID = os.environ.get("GOWA_DEVICE_ID", "").strip()
@@ -145,7 +149,7 @@ async def messages_by_chat(
     _: None = Depends(verify_bridge_key),
 ) -> Any:
     client = _client(request)
-    enc = quote(chat_jid.strip(), safe="")
+    enc = quote(chat_jid.strip(), safe=_GOWA_JID_IN_PATH_SAFE)
     return await _gowa_get(
         client,
         f"/chat/{enc}/messages",
@@ -179,10 +183,13 @@ async def messages_recent(
     for chat in chat_list_sorted[:max_chats]:
         jid = chat.get("jid")
         if isinstance(jid, str) and jid.strip():
-            jids.append(jid.strip())
+            js = jid.strip()
+            if js == "status@broadcast":
+                continue
+            jids.append(js)
 
     async def fetch_messages(jid: str) -> list[dict[str, Any]]:
-        enc = quote(jid, safe="")
+        enc = quote(jid, safe=_GOWA_JID_IN_PATH_SAFE)
         try:
             msg_body = await _gowa_get(
                 client,
