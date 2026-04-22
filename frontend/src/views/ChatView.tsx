@@ -23,7 +23,15 @@ function timeLabel(): string {
   return new Intl.DateTimeFormat('es', { hour: '2-digit', minute: '2-digit' }).format(new Date())
 }
 
-export function ChatView({ config, stats }: { config: ConfigPublic | null; stats: StatsResponse | null }) {
+export function ChatView({
+  config,
+  stats,
+  statsLoading = false,
+}: {
+  config: ConfigPublic | null
+  stats: StatsResponse | null
+  statsLoading?: boolean
+}) {
   const [turns, setTurns] = useState<ChatTurn[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -73,7 +81,11 @@ export function ChatView({ config, stats }: { config: ConfigPublic | null; stats
       <main className="flex-1 overflow-y-auto bg-surface-bright flex flex-col items-center min-h-0">
         <div className="w-full max-w-[44rem] px-6 py-10 md:py-12 space-y-10">
           <div className="flex justify-center">
-            <IndexFragmentBadge stats={stats} className="px-3 py-1.5 rounded-full bg-surface-container-low border border-outline-variant/15" />
+            <IndexFragmentBadge
+              stats={stats}
+              statsLoading={statsLoading}
+              className="px-3 py-1.5 rounded-full bg-surface-container-low border border-outline-variant/15"
+            />
           </div>
           {turns.length === 0 && (
             <p className="text-center text-sm text-on-surface-variant">

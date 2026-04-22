@@ -26,15 +26,18 @@ function formatBytes(n: number): string {
 export function DocumentsView({
   config,
   stats,
+  statsLoading,
   onRefreshStats,
   onRagStatsPatch,
 }: {
   config: ConfigPublic | null
   stats: StatsResponse | null
-  onRefreshStats: () => Promise<void>
+  statsLoading: boolean
+  onRefreshStats: () => Promise<StatsResponse | null>
   onRagStatsPatch: (patch: Partial<StatsResponse>) => void
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const ingestBarClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [queue, setQueue] = useState<QueueItem[]>([])
   const [ingestLoading, setIngestLoading] = useState(false)
   const [ingestProgress, setIngestProgress] = useState(0)
@@ -47,6 +50,7 @@ export function DocumentsView({
   const [sourcePendingDelete, setSourcePendingDelete] = useState<string | null>(null)
   const [deleteSourceLoading, setDeleteSourceLoading] = useState(false)
   const [deleteSourceError, setDeleteSourceError] = useState<string | null>(null)
+  const [ingestDoneMessage, setIngestDoneMessage] = useState<string | null>(null)
 
   const maxBytes = config?.max_upload_bytes ?? 25 * 1024 * 1024
   const maxLabel = formatBytes(maxBytes)
@@ -130,21 +134,22 @@ export function DocumentsView({
   const onIngestQueue = useCallback(async () => {
     const pending = queue.filter((x) => x.status === 'pending')
     if (!pending.length || ingestLoading) return
+    if (ingestBarClearRef.current) {
+      window.clearTimeout(ingestBarClearRef.current)
+      ingestBarClearRef.current = null
+    }
     setError(null)
+    setIngestDoneMessage(null)
     setIngestLoading(true)
-    setIngestProgress(4)
+    setIngestProgress(0)
     const total = pending.length
-    const tick = window.setInterval(() => {
-      setIngestProgress((p) => (p < 94 ? p + 1 : p))
-    }, 800)
     try {
       for (let i = 0; i < pending.length; i++) {
         const item = pending[i]
         setQueue((q) =>
           q.map((x) => (x.id === item.id ? { ...x, status: 'uploading' as const } : x)),
         )
-        const basePct = Math.round((i / total) * 100)
-        setIngestProgress(Math.min(94, basePct + 4))
+        setIngestProgress(Math.max(0, Math.round((i / total) * 100)))
         try {
           const res = await ingestFiles([item.file])
           const msg = res.messages[0] ?? ''
@@ -173,14 +178,25 @@ export function DocumentsView({
             ),
           )
         }
-        setIngestProgress(Math.round(((i + 1) / total) * 100))
-        await onRefreshStats()
+        if (i < total - 1) {
+          await onRefreshStats()
+        }
+        setIngestProgress(Math.min(99, Math.round(((i + 1) / total) * 100)))
       }
       setIngestProgress(100)
+      const final = await onRefreshStats()
+      setIngestDoneMessage(
+        final
+          ? `Indexación finalizada. El servidor indica ${final.chunk_count} fragmento${final.chunk_count === 1 ? '' : 's'}.`
+          : 'Se terminó de enviar archivos, pero no se pudo leer /stats. Revisa el chip del encabezado o recarga.',
+      )
     } finally {
-      window.clearInterval(tick)
       setIngestLoading(false)
-      window.setTimeout(() => setIngestProgress(0), 400)
+      ingestBarClearRef.current = window.setTimeout(() => {
+        ingestBarClearRef.current = null
+        setIngestProgress(0)
+        setIngestDoneMessage(null)
+      }, 3200)
     }
   }, [queue, ingestLoading, onRefreshStats])
 
@@ -209,6 +225,7 @@ export function DocumentsView({
   }, [onRefreshStats, onRagStatsPatch])
 
   const chunkCount = stats?.chunk_count ?? 0
+  const chunkCountLabel = statsLoading ? '…' : String(chunkCount)
 
   return (
     <main className="p-6 md:p-8 min-h-screen bg-surface">
@@ -254,6 +271,12 @@ export function DocumentsView({
           </button>
         </div>
       </div>
+
+      {ingestDoneMessage && (
+        <div className="mb-6 rounded-xl border border-secondary/40 bg-secondary-container/20 px-4 py-3 text-sm text-on-secondary-container font-medium">
+          {ingestDoneMessage}
+        </div>
+      )}
 
       {error && (
         <div className="mb-6 rounded-xl border border-error/30 bg-error-container/20 px-4 py-3 text-sm text-on-error-container">
@@ -385,7 +408,11 @@ export function DocumentsView({
                     <h3 className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant shrink-0">
                       Archivos en el índice
                     </h3>
-                    <IndexFragmentBadge stats={stats} className="text-[10px] text-on-surface-variant font-bold" />
+                    <IndexFragmentBadge
+                      stats={stats}
+                      statsLoading={statsLoading}
+                      className="text-[10px] text-on-surface-variant font-bold"
+                    />
                   </div>
                   <button
                     type="button"
@@ -402,9 +429,11 @@ export function DocumentsView({
                 </p>
                 {indexedSources.length === 0 && !sourcesLoading ? (
                   <p className="text-sm text-on-surface-variant">
-                    {chunkCount > 0
-                      ? 'No se pudo listar fuentes (reintenta) o los trozos no tienen metadato de origen.'
-                      : 'Aún no hay documentos indexados.'}
+                    {statsLoading
+                      ? 'Obteniendo estado del índice desde el servidor…'
+                      : chunkCount > 0
+                        ? 'No se pudo listar fuentes (reintenta) o los trozos no tienen metadato de origen.'
+                        : 'Aún no hay documentos indexados.'}
                   </p>
                 ) : sourcesLoading && indexedSources.length === 0 ? (
                   <p className="text-sm text-on-surface-variant">Cargando lista…</p>
@@ -454,12 +483,16 @@ export function DocumentsView({
               </div>
             </div>
 
-            {ingestLoading && (
+            {(ingestLoading || ingestProgress > 0) && (
               <div className="px-6 md:px-8 py-6 bg-primary/5">
                 <div className="flex justify-between items-center mb-2">
                   <span className="text-xs font-bold text-primary flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-                    Indexando…
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        ingestLoading ? 'bg-primary animate-pulse' : 'bg-secondary'
+                      }`}
+                    />
+                    {ingestLoading ? 'Indexando…' : 'Sincronizado con el servidor'}
                   </span>
                   <span className="text-xs font-bold text-primary">{ingestProgress}%</span>
                 </div>
@@ -470,8 +503,9 @@ export function DocumentsView({
                   />
                 </div>
                 <p className="text-[10px] text-on-surface-variant mt-3 m-0 leading-relaxed max-w-xl">
-                  El servidor procesa la indexación en segundo plano: el chat y el resto de la app pueden seguir usándose;
-                  en PDFs muy grandes la subida puede tardar varios minutos (no cierres la pestaña).
+                  El progreso refleja los archivos enviados; el total de fragmentos en el encabezado viene de{' '}
+                  <code className="font-mono">GET /stats</code> al terminar. En PDFs muy grandes no cierres la
+                  pestaña.
                 </p>
               </div>
             )}
@@ -584,8 +618,8 @@ export function DocumentsView({
                 ¿Vaciar el índice?
               </h2>
               <p className="text-on-surface-variant text-sm leading-relaxed mb-8">
-                Esta acción es irreversible. Se borran los{' '}
-                <span className="font-bold text-on-surface">{chunkCount} chunks</span> y los archivos físicos de la
+                Esta acción es irreversible.                 Se borran los{' '}
+                <span className="font-bold text-on-surface">{chunkCountLabel} chunks</span> y los archivos físicos de la
                 base Chroma en disco; no quedará índice hasta que vuelvas a ingerir documentos.
               </p>
               {resetModalError && (

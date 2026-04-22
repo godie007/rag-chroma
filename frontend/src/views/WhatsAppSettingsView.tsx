@@ -7,9 +7,11 @@ import { Icon } from '../components/Icon'
 export function WhatsAppSettingsView({
   config,
   stats,
+  statsLoading = false,
 }: {
   config: ConfigPublic | null
   stats: StatsResponse | null
+  statsLoading?: boolean
 }) {
   const api = getApiBase()
   const wa = config?.whatsapp_webhook_active ?? false
@@ -26,7 +28,7 @@ export function WhatsAppSettingsView({
           instrucciones del modelo están en la pestaña <span className="font-semibold text-on-surface">Configuraciones</span>.
         </p>
         <div className="mt-3">
-          <IndexFragmentBadge stats={stats} className="text-on-surface-variant" />
+          <IndexFragmentBadge stats={stats} statsLoading={statsLoading} className="text-on-surface-variant" />
         </div>
       </div>
 

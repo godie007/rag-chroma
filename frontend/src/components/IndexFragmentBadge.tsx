@@ -3,13 +3,20 @@ import type { StatsResponse } from '../api'
 /** Misma métrica que el chip del header: fragmentos (vectores) en Chroma. */
 export function IndexFragmentBadge({
   stats,
+  statsLoading = false,
   className = '',
 }: {
   stats: StatsResponse | null
+  statsLoading?: boolean
   className?: string
 }) {
   const n = stats?.chunk_count
   const ready = stats?.ready ?? false
+  if (statsLoading) {
+    return (
+      <span className={`text-xs text-on-surface-variant ${className}`.trim()}>Consultando el índice…</span>
+    )
+  }
   if (n == null) {
     return (
       <span className={`text-xs text-on-surface-variant ${className}`.trim()}>Sin datos del índice</span>

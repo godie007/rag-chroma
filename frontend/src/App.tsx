@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   fetchConfig,
   fetchStats,
@@ -16,17 +16,31 @@ import { WhatsAppSettingsView } from './views/WhatsAppSettingsView'
 function App() {
   const [view, setView] = useState<AppView>('documents')
   const [stats, setStats] = useState<StatsResponse | null>(null)
+  /** Hasta el primer GET /stats terminado no mostrar "0 fragmentos" como si fuera el total real. */
+  /** Solo true hasta el primer GET /stats (éxito o error), para no mostrar 0 al recargar. Refrescos posteriores no enmascaran el total. */
+  const [statsLoading, setStatsLoading] = useState(true)
+  const statsFirstSettled = useRef(false)
   const [config, setConfig] = useState<ConfigPublic | null>(null)
   const [banner, setBanner] = useState<string | null>(null)
 
-  const refreshStats = useCallback(async () => {
+  const refreshStats = useCallback(async (): Promise<StatsResponse | null> => {
+    if (!statsFirstSettled.current) {
+      setStatsLoading(true)
+    }
     try {
       const s = await fetchStats()
       setStats(s)
       setBanner(null)
+      return s
     } catch {
       setStats(null)
       setBanner(`No se pudo conectar con ${getApiBase()}. ¿Está el backend en marcha?`)
+      return null
+    } finally {
+      if (!statsFirstSettled.current) {
+        statsFirstSettled.current = true
+        setStatsLoading(false)
+      }
     }
   }, [])
 
@@ -50,15 +64,17 @@ function App() {
       } catch {
         setConfig(null)
       }
-      try {
-        setStats(await fetchStats())
-        setBanner(null)
-      } catch {
-        setStats(null)
-        setBanner(`No se pudo conectar con ${getApiBase()}. ¿Está el backend en marcha?`)
-      }
+      await refreshStats()
     })()
-  }, [])
+  }, [refreshStats])
+
+  useEffect(() => {
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) void refreshStats()
+    }
+    window.addEventListener('pageshow', onPageShow)
+    return () => window.removeEventListener('pageshow', onPageShow)
+  }, [refreshStats])
 
   useEffect(() => {
     let t: ReturnType<typeof setTimeout> | undefined
@@ -79,7 +95,7 @@ function App() {
   }, [refreshStats])
 
   return (
-    <AppShell view={view} setView={setView} stats={stats}>
+    <AppShell view={view} setView={setView} stats={stats} statsLoading={statsLoading}>
       {banner && (
         <div className="mx-4 md:mx-8 mt-4 rounded-lg border border-tertiary/40 bg-tertiary-container/15 px-4 py-2 text-sm text-on-tertiary-container shrink-0">
           {banner}
@@ -97,6 +113,7 @@ function App() {
           <DocumentsView
             config={config}
             stats={stats}
+            statsLoading={statsLoading}
             onRefreshStats={refreshStats}
             onRagStatsPatch={patchRagStats}
           />
@@ -109,7 +126,7 @@ function App() {
           }
           aria-hidden={view !== 'chat'}
         >
-          <ChatView config={config} stats={stats} />
+          <ChatView config={config} stats={stats} statsLoading={statsLoading} />
         </div>
         <div
           className={
@@ -119,7 +136,11 @@ function App() {
           }
           aria-hidden={view !== 'evaluation'}
         >
-          <EvaluationView stats={stats} onGoDocuments={() => setView('documents')} />
+          <EvaluationView
+            stats={stats}
+            statsLoading={statsLoading}
+            onGoDocuments={() => setView('documents')}
+          />
         </div>
         <div
           className={
@@ -129,7 +150,7 @@ function App() {
           }
           aria-hidden={view !== 'whatsapp'}
         >
-          <WhatsAppSettingsView config={config} stats={stats} />
+          <WhatsAppSettingsView config={config} stats={stats} statsLoading={statsLoading} />
         </div>
         <div
           className={
@@ -139,7 +160,7 @@ function App() {
           }
           aria-hidden={view !== 'settings'}
         >
-          <ConfigurationsView stats={stats} />
+          <ConfigurationsView stats={stats} statsLoading={statsLoading} />
         </div>
       </div>
     </AppShell>

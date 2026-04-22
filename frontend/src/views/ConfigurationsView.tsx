@@ -2,7 +2,13 @@ import { SystemPromptsPanel } from '../components/SystemPromptsPanel'
 import { IndexFragmentBadge } from '../components/IndexFragmentBadge'
 import type { StatsResponse } from '../api'
 
-export function ConfigurationsView({ stats }: { stats: StatsResponse | null }) {
+export function ConfigurationsView({
+  stats,
+  statsLoading = false,
+}: {
+  stats: StatsResponse | null
+  statsLoading?: boolean
+}) {
   return (
     <main className="flex-1 ml-0 p-6 md:p-8 bg-surface min-h-screen">
       <div className="mb-8 max-w-4xl">
@@ -13,7 +19,7 @@ export function ConfigurationsView({ stats }: { stats: StatsResponse | null }) {
           Ajustes de la aplicación: instrucciones del modelo (system prompt) por canal, sin reiniciar el backend.
         </p>
         <div className="mt-3">
-          <IndexFragmentBadge stats={stats} className="text-on-surface-variant" />
+          <IndexFragmentBadge stats={stats} statsLoading={statsLoading} className="text-on-surface-variant" />
         </div>
       </div>
 

@@ -62,9 +62,11 @@ function buildInsight(r: RagasEvaluateResponse): string {
 
 export function EvaluationView({
   stats,
+  statsLoading = false,
   onGoDocuments,
 }: {
   stats: StatsResponse | null
+  statsLoading?: boolean
   onGoDocuments?: () => void
 }) {
   const [preset, setPreset] = useState(PRESET_FILES[0])
@@ -113,7 +115,7 @@ export function EvaluationView({
           Valida el pipeline RAG con métricas estándar: fidelidad, relevancia, precisión y recuperación del contexto.
         </p>
         <div className="mt-3">
-          <IndexFragmentBadge stats={stats} className="text-on-surface-variant" />
+          <IndexFragmentBadge stats={stats} statsLoading={statsLoading} className="text-on-surface-variant" />
         </div>
       </div>
 

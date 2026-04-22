@@ -180,6 +180,7 @@ export type ConfigPublic = {
 }
 
 export async function fetchStats(): Promise<StatsResponse> {
+  // cache: 'no-store' y sin ETag: siempre alineado con el backend tras indexar o recargar
   const res = await fetch(`${base}/stats`, { cache: 'no-store' })
   await handle(res)
   return res.json()

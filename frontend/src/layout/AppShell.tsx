@@ -7,6 +7,8 @@ type AppShellProps = {
   view: AppView
   setView: (v: AppView) => void
   stats: StatsResponse | null
+  /** Hasta el primer /stats, no tratar 0 o vacío como dato real. */
+  statsLoading: boolean
   children: React.ReactNode
 }
 
@@ -34,10 +36,15 @@ function NavTab({
   )
 }
 
-export function AppShell({ view, setView, stats, children }: AppShellProps) {
+export function AppShell({ view, setView, stats, statsLoading, children }: AppShellProps) {
   const apiBase = getApiBase()
   const chunks = stats?.chunk_count
   const ready = stats?.ready ?? false
+  const countLabel = statsLoading
+    ? 'Cargando…'
+    : chunks != null
+      ? `${chunks} fragmentos`
+      : 'Sin datos'
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-on-background font-body">
@@ -61,7 +68,7 @@ export function AppShell({ view, setView, stats, children }: AppShellProps) {
               title={
                 [
                   ready ? 'RAG operativo' : 'RAG no disponible o sin clave',
-                  chunks != null ? `${chunks} fragmentos` : null,
+                  statsLoading ? 'Consultando el servidor' : chunks != null ? `${chunks} fragmentos` : null,
                   stats?.collection,
                 ]
                   .filter(Boolean)
@@ -70,8 +77,8 @@ export function AppShell({ view, setView, stats, children }: AppShellProps) {
             >
               <span className={`w-2 h-2 rounded-full shrink-0 ${ready ? 'bg-secondary' : 'bg-error'}`} />
               <span className="font-semibold text-on-surface truncate">
-                {chunks != null ? `${chunks} fragmentos` : 'Sin datos'}
-                {stats?.collection ? ` · ${stats.collection}` : ''}
+                {countLabel}
+                {stats?.collection && !statsLoading ? ` · ${stats.collection}` : ''}
               </span>
             </span>
             <a
