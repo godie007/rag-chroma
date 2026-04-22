@@ -7,9 +7,6 @@ import {
 } from '../api'
 import { Icon } from './Icon'
 
-/**
- * Tarjeta de gestión de allowlist (diseño alineado con las secciones de EvaluationView).
- */
 export function WhatsAppAllowlistPanel() {
   const [numbers, setNumbers] = useState<string[]>([])
   const [source, setSource] = useState<'file' | 'env'>('env')
@@ -73,13 +70,7 @@ export function WhatsAppAllowlistPanel() {
   }
 
   const onRevert = async () => {
-    if (
-      busy ||
-      !confirm(
-        '¿Restaurar la configuración desde el archivo .env del servidor? Se eliminará la lista guardada por esta interfaz.',
-      )
-    )
-      return
+    if (busy || !confirm('¿Descartar la lista guardada aquí y volver a la configuración del servidor?')) return
     setBusy(true)
     setError(null)
     try {
@@ -87,7 +78,7 @@ export function WhatsAppAllowlistPanel() {
       setNumbers(r.numbers)
       setSource(r.source)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo revertir')
+      setError(e instanceof Error ? e.message : 'No se pudo restablecer')
     } finally {
       setBusy(false)
     }
@@ -95,62 +86,31 @@ export function WhatsAppAllowlistPanel() {
 
   return (
     <section className="bg-surface-container-lowest p-6 md:p-8 rounded-xl shadow-sm border border-outline-variant/5">
-      <h3 className="font-headline text-lg font-bold mb-1 flex items-center gap-2 text-on-surface">
-        <Icon name="verified_user" className="text-primary text-xl" />
-        Números permitidos
-      </h3>
-      <p className="text-sm text-on-surface-variant mb-6 leading-relaxed">
-        Define qué contactos (chats 1:1) pueden recibir respuestas automáticas del RAG. Usa el número en formato internacional
-        sin símbolo <span className="font-mono text-xs">+</span>, solo dígitos.
-      </p>
-
-      <div className="flex flex-wrap items-center gap-3 mb-5">
-        <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Origen de la lista</span>
-        <span
-          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wide ${
-            source === 'file'
-              ? 'bg-primary-container text-on-primary-container'
-              : 'bg-surface-container-high text-on-surface-variant'
-          }`}
-        >
-          <Icon name={source === 'file' ? 'save' : 'tune'} className="text-sm" />
-          {source === 'file' ? 'Persistido (interfaz)' : 'Variable de entorno (.env)'}
-        </span>
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-5">
+        <h3 className="font-headline text-lg font-bold m-0 flex items-center gap-2 text-on-surface">
+          <Icon name="verified_user" className="text-primary text-xl" />
+          Números permitidos
+        </h3>
         {loading ? (
-          <span className="text-xs text-on-surface-variant flex items-center gap-1">
+          <span className="text-xs text-on-surface-variant flex items-center gap-1 shrink-0">
             <Icon name="progress_activity" className="text-base animate-spin" />
             Cargando…
           </span>
         ) : null}
       </div>
 
-      <div className="rounded-lg bg-surface-container-low/60 px-4 py-3 mb-5 text-xs text-on-surface-variant leading-relaxed space-y-2">
-        <p>
-          <strong className="text-on-surface">Lista vacía:</strong> no hay restricción; el bot puede responder a cualquier chat
-          individual.
-        </p>
-        <p>
-          Al guardar desde aquí se crea{' '}
-          <code className="px-1.5 py-0.5 rounded bg-surface-container-highest font-mono text-[10px]">whatsapp_allowlist.json</code>{' '}
-          en el servidor y tiene prioridad sobre{' '}
-          <code className="px-1.5 py-0.5 rounded bg-surface-container-highest font-mono text-[10px]">
-            WHATSAPP_ALLOWED_SENDER_NUMBERS
-          </code>
-          .
-        </p>
-      </div>
+      <p className="text-sm text-on-surface-variant mb-5 leading-snug m-0">
+        Solo dígitos (código de país, sin +). Si la lista está vacía, se permite cualquier chat individual.
+      </p>
 
       {error ? (
         <div className="mb-4 rounded-lg border border-error/25 bg-error-container/10 px-4 py-3 text-sm text-error">{error}</div>
       ) : null}
 
       <div className="mb-5">
-        <span className="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-2">
-          Contactos autorizados ({numbers.length})
-        </span>
         <div className="flex flex-wrap gap-2 min-h-[2.5rem] items-start p-4 rounded-xl bg-surface-container-low border border-outline-variant/10">
           {numbers.length === 0 ? (
-            <p className="text-sm text-on-surface-variant italic m-0">Sin restricciones activas para chats 1:1.</p>
+            <p className="text-sm text-on-surface-variant italic m-0">Ningún número — sin restricción.</p>
           ) : (
             numbers.map((n) => (
               <span
@@ -163,8 +123,8 @@ export function WhatsAppAllowlistPanel() {
                   disabled={busy}
                   onClick={() => void onRemove(n)}
                   className="p-1 rounded-full hover:bg-error/12 text-on-surface-variant hover:text-error disabled:opacity-40 transition-colors"
-                  title="Eliminar de la lista"
-                  aria-label={`Eliminar ${n}`}
+                  title="Quitar"
+                  aria-label={`Quitar ${n}`}
                 >
                   <Icon name="close" className="text-base" />
                 </button>
@@ -174,46 +134,40 @@ export function WhatsAppAllowlistPanel() {
         </div>
       </div>
 
-      <div className="space-y-3">
-        <label className="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">
-          Añadir número
-        </label>
-        <div className="flex flex-col sm:flex-row gap-3">
-          <input
-            type="text"
-            inputMode="tel"
-            autoComplete="tel"
-            placeholder="Ej. 573135656345 o +57 313 565 6345"
-            value={input}
-            disabled={busy}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void onAdd()
-            }}
-            className="flex-1 min-w-0 rounded-xl border-none bg-surface-container-low text-sm font-mono py-3 px-4 focus:ring-2 focus:ring-primary placeholder:text-on-surface-variant/45"
-          />
-          <button
-            type="button"
-            disabled={busy || !input.trim()}
-            onClick={() => void onAdd()}
-            className="shrink-0 px-6 py-3 rounded-xl bg-primary text-on-primary text-sm font-bold uppercase tracking-wide hover:bg-primary-dim transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
-          >
-            <Icon name="person_add" className="text-lg" />
-            Añadir
-          </button>
-        </div>
+      <div className="flex flex-col sm:flex-row gap-3">
+        <input
+          type="text"
+          inputMode="tel"
+          autoComplete="tel"
+          placeholder="Ej. 573135656345"
+          value={input}
+          disabled={busy}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void onAdd()
+          }}
+          className="flex-1 min-w-0 rounded-xl border-none bg-surface-container-low text-sm font-mono py-3 px-4 focus:ring-2 focus:ring-primary placeholder:text-on-surface-variant/45"
+        />
+        <button
+          type="button"
+          disabled={busy || !input.trim()}
+          onClick={() => void onAdd()}
+          className="shrink-0 px-6 py-3 rounded-xl bg-primary text-on-primary text-sm font-bold uppercase tracking-wide hover:bg-primary-dim transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
+        >
+          <Icon name="person_add" className="text-lg" />
+          Añadir
+        </button>
       </div>
 
       {source === 'file' ? (
-        <div className="mt-6 pt-6 border-t border-outline-variant/10">
+        <div className="mt-5 pt-5 border-t border-outline-variant/10">
           <button
             type="button"
             disabled={busy}
             onClick={() => void onRevert()}
-            className="text-sm font-bold text-secondary hover:text-secondary-dim underline-offset-4 hover:underline disabled:opacity-40 inline-flex items-center gap-2"
+            className="text-sm font-semibold text-on-surface-variant hover:text-secondary disabled:opacity-40"
           >
-            <Icon name="restart_alt" className="text-lg" />
-            Volver a usar solo la lista del .env
+            Restablecer lista del servidor
           </button>
         </div>
       ) : null}
