@@ -469,6 +469,10 @@ export function DocumentsView({
                     style={{ width: `${ingestProgress}%` }}
                   />
                 </div>
+                <p className="text-[10px] text-on-surface-variant mt-3 m-0 leading-relaxed max-w-xl">
+                  El servidor procesa la indexación en segundo plano: el chat y el resto de la app pueden seguir usándose;
+                  en PDFs muy grandes la subida puede tardar varios minutos (no cierres la pestaña).
+                </p>
               </div>
             )}
 

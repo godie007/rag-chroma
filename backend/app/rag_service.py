@@ -1,5 +1,6 @@
 import json
 import logging
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -63,6 +64,8 @@ class RAGService:
             separators=["\n\n", "```", "\n", ". ", "; ", " ", ""],
         )
         self._chroma = ChromaStore(settings, self.embeddings)
+        # Una sola escritura a Chroma a la vez (SQLite + embeddings), evita contienda y bloqueos raros.
+        self._index_write_lock = threading.Lock()
 
     def collection_chunk_count(self) -> int:
         return self._chroma.collection_count()
@@ -72,7 +75,8 @@ class RAGService:
 
     def delete_indexed_source(self, source_name: str) -> int:
         """Quita del índice todos los trozos asociados a una fuente (metadato ``source``)."""
-        return self._chroma.delete_by_source(source_name)
+        with self._index_write_lock:
+            return self._chroma.delete_by_source(source_name)
 
     def clear_vector_index(self) -> None:
         """Borra la persistencia de Chroma en disco y recrea una colección vacía."""
@@ -81,7 +85,8 @@ class RAGService:
             raise ValueError(
                 "CHROMA_PERSIST_DIRECTORY apunta a una ruta no permitida para borrado completo."
             )
-        self._chroma.wipe_persist_directory_and_reopen()
+        with self._index_write_lock:
+            self._chroma.wipe_persist_directory_and_reopen()
 
     def ingest_text(self, text: str, source_name: str) -> int:
         """Parte el texto en fragmentos, genera embeddings y los guarda en Chroma.
@@ -92,50 +97,51 @@ class RAGService:
         if not text.strip():
             return 0
 
-        # --- 2. Normalizar saltos de línea (mismo criterio que en preprocesado de archivos) ---
-        text_norm = text.replace("\r\n", "\n").replace("\r", "\n")
+        with self._index_write_lock:
+            # --- 2. Normalizar saltos de línea (mismo criterio que en preprocesado de archivos) ---
+            text_norm = text.replace("\r\n", "\n").replace("\r", "\n")
 
-        # --- 3. Fragmentar: prosa vs fences Markdown, fusionar trozos muy cortos ---
-        merge_cap = self.settings.chunk_merge_hard_max or (self.settings.chunk_size * 2)
-        merge_hard_max = max(merge_cap, self.settings.chunk_min_chars)
-        chunk_strings = chunk_text_for_ingest(
-            text_norm,
-            self.splitter,
-            chunk_size=self.settings.chunk_size,
-            chunk_overlap=self.settings.chunk_overlap,
-            merge_min_chars=self.settings.chunk_min_chars,
-            merge_hard_max=merge_hard_max,
-        )
+            # --- 3. Fragmentar: prosa vs fences Markdown, fusionar trozos muy cortos ---
+            merge_cap = self.settings.chunk_merge_hard_max or (self.settings.chunk_size * 2)
+            merge_hard_max = max(merge_cap, self.settings.chunk_min_chars)
+            chunk_strings = chunk_text_for_ingest(
+                text_norm,
+                self.splitter,
+                chunk_size=self.settings.chunk_size,
+                chunk_overlap=self.settings.chunk_overlap,
+                merge_min_chars=self.settings.chunk_min_chars,
+                merge_hard_max=merge_hard_max,
+            )
 
-        # --- 4. Empaquetar cada trozo como Document (contenido + metadatos para citas) ---
-        documents: list[Document] = []
-        for index, content in enumerate(chunk_strings):
-            documents.append(
-                Document(
-                    page_content=content,
-                    metadata={
-                        "source": source_name,
-                        "chunk_id": f"{source_name}#{index}",
-                    },
+            # --- 4. Empaquetar cada trozo como Document (contenido + metadatos para citas) ---
+            documents: list[Document] = []
+            for index, content in enumerate(chunk_strings):
+                documents.append(
+                    Document(
+                        page_content=content,
+                        metadata={
+                            "source": source_name,
+                            "chunk_id": f"{source_name}#{index}",
+                        },
+                    )
                 )
-            )
 
-        # --- 5. Un id único por vector en Chroma (obligatorio para upserts y trazabilidad) ---
-        chroma_ids = [str(uuid4()) for _ in documents]
+            # --- 5. Un id único por vector en Chroma (obligatorio para upserts y trazabilidad) ---
+            chroma_ids = [str(uuid4()) for _ in documents]
 
-        # --- 6. Asegurar disco escribible antes de insertar (evita sqlite 1032 en algunos entornos) ---
-        self._chroma.ensure_writable_before_ingest()
+            # --- 6. Asegurar disco escribible antes de insertar (evita sqlite 1032 en algunos entornos) ---
+            self._chroma.ensure_writable_before_ingest()
 
-        # --- 7. Insertar en lotes para no saturar SQLite/memoria en PDFs enormes ---
-        batch_size = max(1, self.settings.chroma_ingest_batch_size)
-        for batch_start in range(0, len(documents), batch_size):
-            batch_end = batch_start + batch_size
-            self._chroma.add_documents_batch(
-                documents[batch_start:batch_end],
-                chroma_ids[batch_start:batch_end],
-            )
+            # --- 7. Insertar en lotes para no saturar SQLite/memoria en PDFs enormes ---
+            batch_size = max(1, self.settings.chroma_ingest_batch_size)
+            for batch_start in range(0, len(documents), batch_size):
+                batch_end = batch_start + batch_size
+                self._chroma.add_documents_batch(
+                    documents[batch_start:batch_end],
+                    chroma_ids[batch_start:batch_end],
+                )
 
-        return len(documents)
+            return len(documents)
 
     def _search_sorted_within_l2_cap(
         self,

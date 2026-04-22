@@ -418,7 +418,10 @@ async def ingest(files: list[UploadFile] = File(...)):
                 detail=f"Archivo {upload.filename} supera el límite de {settings.max_upload_bytes} bytes",
             )
         try:
-            text = load_document_bytes(upload.filename or "unknown", raw)
+            # PDF/MD grande: extrae en hilo para no bloquear el bucle de eventos (/chat, /health siguen vivos).
+            text = await asyncio.to_thread(
+                load_document_bytes, upload.filename or "unknown", raw
+            )
         except ValueError as e:
             messages.append(f"Omitido {upload.filename}: {e}")
             continue
@@ -427,7 +430,10 @@ async def ingest(files: list[UploadFile] = File(...)):
             upload.filename,
             len(text),
         )
-        n = rag.ingest_text(text, upload.filename or "sin_nombre")
+        # Indexación (embeddings + Chroma) fuera del hilo principal async; el lock en RAGService serializa escrituras.
+        n = await asyncio.to_thread(
+            rag.ingest_text, text, upload.filename or "sin_nombre"
+        )
         elapsed = time.perf_counter() - t0
         total_chunks += n
         processed += 1
@@ -438,6 +444,8 @@ async def ingest(files: list[UploadFile] = File(...)):
             n,
             elapsed,
         )
+        # Cede el bucle de eventos entre archivos (multimodal) para atender otras peticiones.
+        await asyncio.sleep(0)
     return IngestResponse(
         files_processed=processed,
         chunks_added=total_chunks,
