@@ -170,6 +170,9 @@ class IngestResponse(BaseModel):
     files_processed: int
     chunks_added: int
     messages: list[str]
+    # Total de vectores en Chroma al terminar (mismo proceso que escribió; GET /stats puede retrasar o ir a otro worker).
+    chunk_count: int = 0
+    ready: bool = True
 
 
 class ResetIndexResponse(BaseModel):
@@ -446,10 +449,13 @@ async def ingest(files: list[UploadFile] = File(...)):
         )
         # Cede el bucle de eventos entre archivos (multimodal) para atender otras peticiones.
         await asyncio.sleep(0)
+    total_in_index = rag.collection_chunk_count()
     return IngestResponse(
         files_processed=processed,
         chunks_added=total_chunks,
         messages=messages,
+        chunk_count=total_in_index,
+        ready=True,
     )
 
 

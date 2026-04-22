@@ -5,6 +5,7 @@ import {
   ingestFiles,
   resetVectorIndex,
   type ConfigPublic,
+  type IngestResponse,
   type StatsResponse,
 } from '../api'
 import { IndexFragmentBadge } from '../components/IndexFragmentBadge'
@@ -21,6 +22,46 @@ function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/** Reintenta GET /stats cuando el contador tarda o va a otro worker (0 mientras el índice ya tiene datos). */
+async function waitForStatsToReach(
+  onRefresh: () => Promise<StatsResponse | null>,
+  atLeast: number,
+  opts: { maxAttempts?: number; delayMs?: number } = {},
+): Promise<StatsResponse | null> {
+  const maxAttempts = opts.maxAttempts ?? 45
+  const delayMs = opts.delayMs ?? 1000
+  let last: StatsResponse | null = null
+  for (let t = 0; t < maxAttempts; t++) {
+    last = await onRefresh()
+    if (last && last.chunk_count >= atLeast) return last
+    await new Promise((r) => setTimeout(r, delayMs))
+  }
+  return last
+}
+
+/**
+ * POST /ingest devuelve el total de fragmentos en el mismo proceso que escribió.
+ * GET /stats puede devolver 0 o menos justo después; reforzamos el chip y alineamos con reintentos.
+ */
+async function reconcileAfterIngest(
+  onRefresh: () => Promise<StatsResponse | null>,
+  onRagStatsPatch: (patch: Partial<StatsResponse>) => void,
+  r: IngestResponse,
+) {
+  if (typeof r.chunk_count !== 'number' || r.chunk_count < 0) {
+    await onRefresh()
+    return
+  }
+  onRagStatsPatch({ chunk_count: r.chunk_count, ready: r.ready ?? true })
+  const s0 = await onRefresh()
+  if (!s0 || s0.chunk_count < r.chunk_count) {
+    onRagStatsPatch({ chunk_count: r.chunk_count, ready: r.ready ?? true })
+  }
+  if (r.chunk_count > 0 && s0 && s0.chunk_count === 0) {
+    await waitForStatsToReach(onRefresh, r.chunk_count, { maxAttempts: 45, delayMs: 1000 })
+  }
 }
 
 export function DocumentsView({
@@ -166,6 +207,7 @@ export function DocumentsView({
     setIngestFilePosition({ n: 1, total: pending.length })
     setIngestCurrentName(pending[0]?.file.name ?? null)
     const total = pending.length
+    let lastIngestResponse: IngestResponse | null = null
     try {
       for (let i = 0; i < pending.length; i++) {
         const item = pending[i]
@@ -177,6 +219,7 @@ export function DocumentsView({
         setIngestProgress(Math.max(1, Math.round((i / total) * 100)))
         try {
           const res = await ingestFiles([item.file])
+          lastIngestResponse = res
           const msg = res.messages[0] ?? ''
           setQueue((q) =>
             q.map((x) => {
@@ -187,6 +230,7 @@ export function DocumentsView({
               return { ...x, status: 'indexed' as const, detail: msg }
             }),
           )
+          await reconcileAfterIngest(onRefreshStats, onRagStatsPatch, res)
         } catch (err) {
           const isTimeout =
             err instanceof Error &&
@@ -203,18 +247,48 @@ export function DocumentsView({
             ),
           )
         }
-        if (i < total - 1) {
-          await onRefreshStats()
-        }
         setIngestProgress(Math.min(99, Math.round(((i + 1) / total) * 100)))
       }
       setIngestProgress(100)
       const final = await onRefreshStats()
-      setIngestDoneMessage(
-        final
-          ? `Indexación finalizada. El servidor indica ${final.chunk_count} fragmento${final.chunk_count === 1 ? '' : 's'}.`
-          : 'Se terminó de enviar archivos, pero no se pudo leer /stats. Revisa el chip del encabezado o recarga.',
-      )
+      const authoritativeCount =
+        final && final.chunk_count > 0
+          ? final.chunk_count
+          : (typeof lastIngestResponse?.chunk_count === 'number'
+              ? lastIngestResponse.chunk_count
+              : null) ?? 0
+      if (
+        lastIngestResponse &&
+        typeof lastIngestResponse.chunk_count === 'number' &&
+        lastIngestResponse.chunk_count >= 0
+      ) {
+        if (!final || final.chunk_count < lastIngestResponse.chunk_count) {
+          onRagStatsPatch({ chunk_count: lastIngestResponse.chunk_count, ready: true })
+        }
+      }
+      if (
+        lastIngestResponse &&
+        typeof lastIngestResponse.chunk_count === 'number' &&
+        lastIngestResponse.chunk_count > 0 &&
+        (!final || final.chunk_count === 0)
+      ) {
+        const caught = await waitForStatsToReach(
+          onRefreshStats,
+          lastIngestResponse.chunk_count,
+        )
+        const n = caught?.chunk_count ?? lastIngestResponse.chunk_count
+        setIngestDoneMessage(
+          `Indexación finalizada. El índice queda con ${n} fragmento${n === 1 ? '' : 's'} (sincronizado con el servidor).`,
+        )
+      } else {
+        setIngestDoneMessage(
+          authoritativeCount > 0
+            ? `Indexación finalizada. El índice queda con ${authoritativeCount} fragmento${authoritativeCount === 1 ? '' : 's'}.`
+            : final
+              ? `Proceso terminado. El servidor indica ${final.chunk_count} fragmento${final.chunk_count === 1 ? '' : 's'}.`
+              : 'Se terminó de enviar archivos, pero no se pudo leer /stats. Revisa el chip del encabezado o recarga.',
+        )
+      }
     } finally {
       ingestRunRef.current = false
       setIngestLoading(false)
@@ -226,7 +300,7 @@ export function DocumentsView({
         setIngestCurrentName(null)
       }, 3200)
     }
-  }, [onRefreshStats])
+  }, [onRefreshStats, onRagStatsPatch])
 
   useLayoutEffect(() => {
     if (!ingestLoading) return

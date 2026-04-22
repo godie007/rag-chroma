@@ -37,6 +37,9 @@ export type IngestResponse = {
   files_processed: number
   chunks_added: number
   messages: string[]
+  /** Total de fragmentos en Chroma al terminar (misma petición / proceso que indexó; más fiable que GET /stats justo detrás). */
+  chunk_count?: number
+  ready?: boolean
 }
 
 async function handle(res: Response): Promise<void> {
