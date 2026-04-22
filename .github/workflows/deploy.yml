@@ -14,18 +14,34 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Remove package.json to PREVENT any npm
+      - name: Build frontend
         run: |
-          rm -f "$GITHUB_WORKSPACE/frontend/package.json"
-          rm -f "$GITHUB_WORKSPACE/frontend/package-lock.json"
-          rm -rf "$GITHUB_WORKSPACE/frontend/node_modules"
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/frontend"
+          if command -v npm >/dev/null 2>&1; then
+            npm ci
+            npm run build
+          else
+            echo "::warning::npm no encontrado; se usa frontend/dist del repositorio si existe"
+            if [ ! -d dist ] || [ ! -f dist/index.html ]; then
+              echo "ERROR: No hay dist y no se puede compilar. Instala Node.js/npm en el runner o incluye un build en el repo."
+              exit 1
+            fi
+          fi
+          test -f dist/index.html
 
-      - name: Deploy Frontend to Nginx
+      - name: Copy frontend build to Nginx document root
         run: |
+          set -euo pipefail
+          DIST="$GITHUB_WORKSPACE/frontend/dist"
+          test -d "$DIST" && test -f "$DIST/index.html"
           sudo mkdir -p /var/www/rag
           sudo rm -rf /var/www/rag/*
-          sudo cp -R "$GITHUB_WORKSPACE/frontend/dist/." /var/www/rag/
+          sudo cp -a "$DIST"/. /var/www/rag/
           sudo chown -R www-data:www-data /var/www/rag
+          sudo find /var/www/rag -type f -exec chmod 644 {} \;
+          sudo find /var/www/rag -type d -exec chmod 755 {} \;
+          echo "Build desplegado en /var/www/rag ($(find /var/www/rag -type f | wc -l) archivos)"
 
       - name: Deploy Backend
         run: |
