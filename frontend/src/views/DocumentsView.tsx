@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   deleteIndexedSource,
   fetchIndexedSources,
@@ -38,7 +38,14 @@ export function DocumentsView({
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const ingestBarClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** Siempre leer la cola al hacer clic; evita useCallback con [] pendiente por error de cierre. */
+  const queueRef = useRef<QueueItem[]>([])
+  const ingestRunRef = useRef(false)
+  const ingestStatusAnchorRef = useRef<HTMLDivElement | null>(null)
   const [queue, setQueue] = useState<QueueItem[]>([])
+  useLayoutEffect(() => {
+    queueRef.current = queue
+  }, [queue])
   const [ingestLoading, setIngestLoading] = useState(false)
   const [ingestProgress, setIngestProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
@@ -51,6 +58,9 @@ export function DocumentsView({
   const [deleteSourceLoading, setDeleteSourceLoading] = useState(false)
   const [deleteSourceError, setDeleteSourceError] = useState<string | null>(null)
   const [ingestDoneMessage, setIngestDoneMessage] = useState<string | null>(null)
+  const [ingestHint, setIngestHint] = useState<string | null>(null)
+  const [ingestFilePosition, setIngestFilePosition] = useState<{ n: number; total: number } | null>(null)
+  const [ingestCurrentName, setIngestCurrentName] = useState<string | null>(null)
 
   const maxBytes = config?.max_upload_bytes ?? 25 * 1024 * 1024
   const maxLabel = formatBytes(maxBytes)
@@ -132,24 +142,39 @@ export function DocumentsView({
   }, [sourcePendingDelete, onRagStatsPatch, onRefreshStats, loadIndexedSources])
 
   const onIngestQueue = useCallback(async () => {
-    const pending = queue.filter((x) => x.status === 'pending')
-    if (!pending.length || ingestLoading) return
+    if (ingestRunRef.current) {
+      return
+    }
+    const pending = queueRef.current.filter((x) => x.status === 'pending')
+    if (!pending.length) {
+      setIngestHint(
+        'No hay archivos en estado "Pendiente": usa "Añadir archivos" o arrastra al recuadro, luego "Indexar cola". Si ya indexaste, la fila pasa a "Indexado" y hace falta añadir de nuevo o otro archivo.',
+      )
+      window.setTimeout(() => setIngestHint(null), 8000)
+      return
+    }
     if (ingestBarClearRef.current) {
       window.clearTimeout(ingestBarClearRef.current)
       ingestBarClearRef.current = null
     }
+    setIngestHint(null)
     setError(null)
     setIngestDoneMessage(null)
+    ingestRunRef.current = true
     setIngestLoading(true)
-    setIngestProgress(0)
+    setIngestProgress(1)
+    setIngestFilePosition({ n: 1, total: pending.length })
+    setIngestCurrentName(pending[0]?.file.name ?? null)
     const total = pending.length
     try {
       for (let i = 0; i < pending.length; i++) {
         const item = pending[i]
+        setIngestFilePosition({ n: i + 1, total })
+        setIngestCurrentName(item.file.name)
         setQueue((q) =>
           q.map((x) => (x.id === item.id ? { ...x, status: 'uploading' as const } : x)),
         )
-        setIngestProgress(Math.max(0, Math.round((i / total) * 100)))
+        setIngestProgress(Math.max(1, Math.round((i / total) * 100)))
         try {
           const res = await ingestFiles([item.file])
           const msg = res.messages[0] ?? ''
@@ -191,14 +216,24 @@ export function DocumentsView({
           : 'Se terminó de enviar archivos, pero no se pudo leer /stats. Revisa el chip del encabezado o recarga.',
       )
     } finally {
+      ingestRunRef.current = false
       setIngestLoading(false)
       ingestBarClearRef.current = window.setTimeout(() => {
         ingestBarClearRef.current = null
         setIngestProgress(0)
         setIngestDoneMessage(null)
+        setIngestFilePosition(null)
+        setIngestCurrentName(null)
       }, 3200)
     }
-  }, [queue, ingestLoading, onRefreshStats])
+  }, [onRefreshStats])
+
+  useLayoutEffect(() => {
+    if (!ingestLoading) return
+    requestAnimationFrame(() => {
+      ingestStatusAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+  }, [ingestLoading])
 
   const onConfirmEmpty = useCallback(async () => {
     setError(null)
@@ -271,6 +306,12 @@ export function DocumentsView({
           </button>
         </div>
       </div>
+
+      {ingestHint && (
+        <div className="mb-4 rounded-xl border border-tertiary/30 bg-tertiary-container/20 px-4 py-3 text-sm text-on-tertiary-container">
+          {ingestHint}
+        </div>
+      )}
 
       {ingestDoneMessage && (
         <div className="mb-6 rounded-xl border border-secondary/40 bg-secondary-container/20 px-4 py-3 text-sm text-on-secondary-container font-medium">
@@ -382,6 +423,49 @@ export function DocumentsView({
 
         <div className="col-span-12 lg:col-span-8">
           <div className="bg-surface-container-lowest p-1 rounded-xl shadow-sm min-h-[420px] flex flex-col">
+            {(ingestLoading || ingestProgress > 0) && (
+              <div
+                ref={ingestStatusAnchorRef}
+                className="mx-2 mt-2 mb-1 rounded-lg border-2 border-primary/40 bg-primary/10 px-4 py-3 shadow-sm"
+              >
+                <div className="flex justify-between items-center gap-2 mb-2 flex-wrap">
+                  <span className="text-xs font-bold text-primary flex items-center gap-2 min-w-0">
+                    <span
+                      className={`w-2 h-2 rounded-full shrink-0 ${
+                        ingestLoading ? 'bg-primary animate-pulse' : 'bg-secondary'
+                      }`}
+                    />
+                    <span className="truncate">
+                      {ingestLoading ? 'Indexando' : 'Completado'}
+                      {ingestFilePosition
+                        ? ` · ${ingestFilePosition.n} / ${ingestFilePosition.total}`
+                        : ''}
+                      {ingestCurrentName ? (
+                        <span className="font-extrabold" title={ingestCurrentName}>
+                          {': '}
+                          {ingestCurrentName}
+                        </span>
+                      ) : null}
+                    </span>
+                  </span>
+                  <span className="text-xs font-bold text-primary tabular-nums shrink-0">
+                    {ingestProgress}%
+                  </span>
+                </div>
+                <div className="h-2 w-full bg-primary/15 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary rounded-full transition-all duration-300"
+                    style={{ width: `${ingestProgress}%` }}
+                  />
+                </div>
+                <p className="text-[10px] text-on-surface-variant mt-2 m-0 leading-relaxed">
+                  El progreso es por archivos en cola; el total de fragmentos en el encabezado se confirma con el mensaje
+                  al terminar. Los PDFs grandes pueden tardar mucho (sigue viendo &quot;Indexando&quot; y el icono
+                  &quot;Procesando&quot; en la cola abajo).
+                </p>
+              </div>
+            )}
+
             <button
               type="button"
               onClick={() => inputRef.current?.click()}
@@ -471,44 +555,23 @@ export function DocumentsView({
                   consola del backend para ver el progreso.
                 </p>
               )}
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => void onIngestQueue()}
-                  disabled={ingestLoading || !queue.some((q) => q.status === 'pending')}
-                  className="px-4 py-2 bg-primary text-on-primary rounded-md text-xs font-bold hover:bg-primary-dim disabled:opacity-50"
-                >
-                  {ingestLoading ? 'Indexando…' : 'Indexar cola'}
-                </button>
-              </div>
-            </div>
-
-            {(ingestLoading || ingestProgress > 0) && (
-              <div className="px-6 md:px-8 py-6 bg-primary/5">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-xs font-bold text-primary flex items-center gap-2">
-                    <span
-                      className={`w-2 h-2 rounded-full ${
-                        ingestLoading ? 'bg-primary animate-pulse' : 'bg-secondary'
-                      }`}
-                    />
-                    {ingestLoading ? 'Indexando…' : 'Sincronizado con el servidor'}
-                  </span>
-                  <span className="text-xs font-bold text-primary">{ingestProgress}%</span>
+              <div className="flex flex-col gap-1.5">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void onIngestQueue()}
+                    disabled={ingestLoading || !queue.some((q) => q.status === 'pending')}
+                    className="px-4 py-2 bg-primary text-on-primary rounded-md text-xs font-bold hover:bg-primary-dim disabled:opacity-50"
+                  >
+                    {ingestLoading ? 'Indexando…' : 'Indexar cola'}
+                  </button>
                 </div>
-                <div className="h-1.5 w-full bg-primary/10 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-primary rounded-full transition-all duration-500"
-                    style={{ width: `${ingestProgress}%` }}
-                  />
-                </div>
-                <p className="text-[10px] text-on-surface-variant mt-3 m-0 leading-relaxed max-w-xl">
-                  El progreso refleja los archivos enviados; el total de fragmentos en el encabezado viene de{' '}
-                  <code className="font-mono">GET /stats</code> al terminar. En PDFs muy grandes no cierres la
-                  pestaña.
+                <p className="text-[10px] text-on-surface-variant m-0 max-w-prose">
+                  Tras añadir archivos, la cola (abajo) debe mostrar <strong className="text-on-surface">Pendiente</strong>{' '}
+                  hasta que pulses aquí. Al indexar, el panel de progreso (arriba) muestra el archivo actual.
                 </p>
               </div>
-            )}
+            </div>
 
             <div className="flex-1 px-6 md:px-8 py-4 overflow-y-auto">
               <h3 className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-4">
