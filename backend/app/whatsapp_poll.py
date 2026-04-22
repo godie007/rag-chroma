@@ -430,8 +430,10 @@ async def process_normalized_whatsapp_message(
     allow_src = settings.whatsapp_allowed_sender_numbers.strip()
     allow = _allowed_sender_digit_sets(allow_src)
     if not _incoming_sender_allowed(chat_jid, allow):
-        logger.info(
-            "WhatsApp %s: remitente no permitido chat_jid=%s dígitos_extraídos=%s allowlist=%s",
+        logger.warning(
+            "WhatsApp %s: remitente no permitido (allowlist) chat_jid=%s dígitos_extraídos=%s allowlist=%s — "
+            "vacía WHATSAPP_ALLOWED_SENDER_NUMBERS para permitir todos, o lista los números que *escriben* al bot, "
+            "no el número de la sesión GOWA",
             source,
             chat_jid,
             _jid_user_digits(chat_jid),
@@ -733,8 +735,9 @@ async def run_whatsapp_poll_loop(
                 raise
             except Exception as e:
                 logger.warning(
-                    "WhatsApp polling: error (%s): %s",
+                    "WhatsApp polling: error (%s): %s: %s",
                     settings.whatsapp_poll_mode,
+                    type(e).__name__,
                     e,
                 )
                 await asyncio.sleep(interval)
