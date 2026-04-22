@@ -34,6 +34,7 @@ import httpx
 from fastapi import Request
 
 from app.config import Settings
+from app.whatsapp_allowlist_store import effective_allowed_sender_digit_sets
 from app.conversation_commands import NEW_CHAT_COMMAND, is_new_chat_command, new_chat_acknowledgement
 from app.preprocess import strip_pdf_glyph_tokens
 from app.rag_service import RAGService
@@ -427,8 +428,7 @@ async def process_normalized_whatsapp_message(
     if not settings.whatsapp_reply_in_groups and "@g.us" in chat_jid:
         return {"ok": True, "ignored": True, "reason": "groups_disabled"}
 
-    allow_src = settings.whatsapp_allowed_sender_numbers.strip()
-    allow = _allowed_sender_digit_sets(allow_src)
+    allow = effective_allowed_sender_digit_sets(settings)
     if not _incoming_sender_allowed(chat_jid, allow):
         logger.warning(
             "WhatsApp %s: remitente no permitido (allowlist) chat_jid=%s dígitos_extraídos=%s allowlist=%s — "

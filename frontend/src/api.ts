@@ -148,6 +148,41 @@ export async function fetchConfig(): Promise<ConfigPublic> {
   return res.json()
 }
 
+export type WhatsAppAllowlistResponse = {
+  numbers: string[]
+  source: 'file' | 'env'
+}
+
+export async function fetchWhatsAppAllowlist(): Promise<WhatsAppAllowlistResponse> {
+  const res = await fetch(`${base}/whatsapp/allowlist`, { cache: 'no-store' })
+  await handle(res)
+  return res.json()
+}
+
+export async function addWhatsAppAllowlistNumber(number: string): Promise<WhatsAppAllowlistResponse> {
+  const res = await fetch(`${base}/whatsapp/allowlist`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ number }),
+  })
+  await handle(res)
+  return res.json()
+}
+
+export async function removeWhatsAppAllowlistNumber(number: string): Promise<WhatsAppAllowlistResponse> {
+  const u = new URL(`${base}/whatsapp/allowlist`)
+  u.searchParams.set('number', number)
+  const res = await fetch(u.toString(), { method: 'DELETE' })
+  await handle(res)
+  return res.json()
+}
+
+export async function revertWhatsAppAllowlistToEnv(): Promise<WhatsAppAllowlistResponse> {
+  const res = await fetch(`${base}/whatsapp/allowlist/revert-env`, { method: 'POST' })
+  await handle(res)
+  return res.json()
+}
+
 export type RagasEvaluateResponse = {
   eval_file: string
   averages: Record<string, number>

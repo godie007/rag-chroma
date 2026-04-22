@@ -3,9 +3,9 @@ import json
 import logging
 import time
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -20,6 +20,13 @@ from app.preprocess import (
     strip_pdf_glyph_tokens,
 )
 from app.rag_service import RAGService
+from app.whatsapp_allowlist_store import (
+    add_allowlist_number,
+    delete_allowlist_storage_file,
+    get_allowlist_numbers,
+    remove_allowlist_number,
+    set_allowlist_numbers,
+)
 from app.whatsapp_poll import (
     process_raw_whatsapp_inbound_dict,
     run_whatsapp_poll_loop,
@@ -187,6 +194,19 @@ class DeleteIndexedSourceResponse(BaseModel):
     ready: bool = True
 
 
+class WhatsAppAllowlistOut(BaseModel):
+    numbers: list[str]
+    source: Literal["file", "env"]
+
+
+class WhatsAppAllowlistPutBody(BaseModel):
+    numbers: list[str] = Field(default_factory=list)
+
+
+class WhatsAppAllowlistAddBody(BaseModel):
+    number: str = Field(..., min_length=1, max_length=40)
+
+
 class ConfigPublic(BaseModel):
     openai_chat_temperature: float
     openai_chat_max_output_tokens: int
@@ -261,6 +281,42 @@ def public_config():
         whatsapp_api_base_url=s.whatsapp_api_base_url,
         whatsapp_poll_interval_sec=s.whatsapp_poll_interval_sec,
     )
+
+
+@app.get("/whatsapp/allowlist", response_model=WhatsAppAllowlistOut)
+def whatsapp_allowlist_get():
+    s = get_settings()
+    nums, src = get_allowlist_numbers(s)
+    return WhatsAppAllowlistOut(numbers=nums, source=src)
+
+
+@app.put("/whatsapp/allowlist", response_model=WhatsAppAllowlistOut)
+def whatsapp_allowlist_put(body: WhatsAppAllowlistPutBody):
+    out = set_allowlist_numbers(body.numbers)
+    return WhatsAppAllowlistOut(numbers=out, source="file")
+
+
+@app.post("/whatsapp/allowlist", response_model=WhatsAppAllowlistOut)
+def whatsapp_allowlist_add(body: WhatsAppAllowlistAddBody):
+    try:
+        out = add_allowlist_number(get_settings(), body.number)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return WhatsAppAllowlistOut(numbers=out, source="file")
+
+
+@app.delete("/whatsapp/allowlist", response_model=WhatsAppAllowlistOut)
+def whatsapp_allowlist_delete(number: str = Query(..., min_length=1, max_length=40)):
+    out = remove_allowlist_number(get_settings(), number)
+    return WhatsAppAllowlistOut(numbers=out, source="file")
+
+
+@app.post("/whatsapp/allowlist/revert-env", response_model=WhatsAppAllowlistOut)
+def whatsapp_allowlist_revert_env():
+    delete_allowlist_storage_file()
+    s = get_settings()
+    nums, src = get_allowlist_numbers(s)
+    return WhatsAppAllowlistOut(numbers=nums, source=src)
 
 
 @app.post("/ingest", response_model=IngestResponse)

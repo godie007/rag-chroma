@@ -3,6 +3,7 @@ import { chat, getApiBase, type ChatResponse, type ConfigPublic, type StatsRespo
 import { IndexFragmentBadge } from '../components/IndexFragmentBadge'
 import { MarkdownContent } from '../components/MarkdownContent'
 import { Icon } from '../components/Icon'
+import { WhatsAppAllowlistPanel } from '../components/WhatsAppAllowlistPanel'
 
 type ChatTurn = {
   role: 'user' | 'assistant'
@@ -238,6 +239,7 @@ export function ChatView({ config, stats }: { config: ConfigPublic | null; stats
                   {getApiBase()}/webhooks/whatsapp
                 </code>
               </p>
+              <WhatsAppAllowlistPanel />
             </div>
           ) : null}
         </div>
