@@ -12,6 +12,7 @@ from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 
 from app.config import Settings
+from app.prompts import SYSTEM_CLARIFICATION_AMBIGUITY_EVAL
 from app.rag_service import RAGService, SourceChunk, GenerateChannel
 
 logger = logging.getLogger("rag_qc.clarify")
@@ -25,18 +26,6 @@ class AmbiguityEvaluation(BaseModel):
         default=None,
         description="Si no es ambiguo: reformulación breve para el retriever, opcional.",
     )
-
-
-_EVAL_SYSTEM = """Eres un evaluador de si el contexto recuperado basta para responder con precisión en un RAG.
-
-Con la pregunta (o consulta) del usuario y extractos de documentos, decide:
-- is_ambiguous = true solo si hace falta un matiz del usuario (varias interpretaciones, contradicción fuerte, falta
-  alcance clave) para no inventar ni confundir.
-- is_ambiguous = false si, aunque el contexto sea pobre, basta con responder a partir de la documentación o con
-  "no consta" sin pedir otra pregunta.
-
-Si is_ambiguous: una sola pregunta de clarificación, corta, en el idioma de la pregunta.
-Si no: refined_query opcional o null."""
 
 
 class _GraphState(TypedDict, total=False):
@@ -105,7 +94,7 @@ Documentos (extractos recuperados, uso interno):
 """
             out: AmbiguityEvaluation = struct.invoke(  # type: ignore[assignment]
                 [
-                    {"role": "system", "content": _EVAL_SYSTEM},
+                    {"role": "system", "content": SYSTEM_CLARIFICATION_AMBIGUITY_EVAL},
                     {"role": "user", "content": human},
                 ]
             )
