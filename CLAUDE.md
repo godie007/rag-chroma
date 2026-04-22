@@ -1,6 +1,6 @@
-# CLAUDE.md - test3
+# CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guía para asistentes de código (Claude Code, Cursor, etc.) en este repositorio.
 
 ## Project Overview
 
@@ -77,12 +77,13 @@ npm run lint
 - FastAPI application with lifespan context manager
 - CORS middleware configured via `Settings.cors_origins`
 - Global instances: `_settings` (config), `_rag` (RAG service), optional asyncio task `_whatsapp_poll_task` when `WHATSAPP_ENABLED` and polling is on
+- `POST /ingest` reads each upload with `await upload.read()`, runs `load_document_bytes` in `asyncio.to_thread`, then `rag.ingest_text` in `asyncio.to_thread` (keeps the event loop responsive for `/health` and `/chat` during large PDFs). Response includes **`chunk_count`** (Chroma `collection_count()` after the batch) and **`ready`**, in addition to `files_processed`, `chunks_added`, and `messages`.
 
 **Core modules:**
 
 1. **`config.py`** — `Settings` dataclass
    - Loads environment variables (OpenAI API key, Chroma paths, chunking params, retrieval thresholds)
-   - Key params: `CHUNK_SIZE`, `CHUNK_OVERLAP`, `TOP_K`, `MMR_LAMBDA`, `RETRIEVE_MAX_L2_DISTANCE`, etc.
+   - Key params: `CHUNK_SIZE`, `CHUNK_OVERLAP`, `TOP_K`, `MMR_LAMBDA`, `RETRIEVE_MAX_L2_DISTANCE`, `OPENAI_EMBEDDING_MODEL`, optional `OPENAI_EMBEDDING_DIMENSIONS` (passed to `OpenAIEmbeddings` for MRL on `text-embedding-3-*`)
 
 2. **`rag_service.py`** — `RAGService` class (orchestration)
    - `ingest_text(text, source_name)`: chunks text and adds to Chroma via `ChromaStore`
@@ -112,7 +113,9 @@ npm run lint
 7. **`paths.py`** — path resolution
    - `resolve_eval_jsonl_path()`: normalizes eval file paths relative to project root
 
-8. **`whatsapp_poll.py`** — optional WhatsApp bridge (no Evolution API)
+8. **`prompt_store.py` / `clarify_*` (if enabled)** — overrides for system prompts and optional clarification flow; wired to `/config/prompts` and chat/WhatsApp
+
+9. **`whatsapp_poll.py`** — optional WhatsApp bridge (no Evolution API)
    - Polls Jetson Flask API (`WHATSAPP_API_BASE_URL`, default example `http://192.168.1.254:8090`): mode `recent` → `GET /messages/recent` (items include `is_from_me`); mode `chats` → `GET /chats` then `GET /messages?chat_jid=…` (same `is_from_me` per message)
    - Sends replies via `POST /send/text` (`phone`, `message`)
    - `POST /webhooks/whatsapp` on this backend for push-style delivery from the Jetson (`whatsapp_receiver.sh` or Flask); optional `WHATSAPP_WEBHOOK_SECRET` header
@@ -121,14 +124,17 @@ npm run lint
 **API Endpoints:**
 - `GET /health` — service availability
 - `GET /stats` — chunk count, collection name, readiness
+- `GET /stats/sources` — distinct `source` values in the index
+- `GET` / `PUT` / `DELETE` `/config/prompts` — effective system prompts per channel (web, WhatsApp, eval)
 - `GET /config` — public config values (chunk_size, top_k, mmr_lambda, etc.)
-- `POST /ingest` — multipart file upload, processes and stores documents
+- `POST /ingest` — multipart `files` → JSON with `files_processed`, `chunks_added`, `messages`, **`chunk_count`**, **`ready`**
+- `POST /ingest/delete-source` — remove all chunks for a given `source` name
 - `POST /ingest/reset` — clears Chroma collection (required when changing `CHUNK_SIZE`/`CHUNK_OVERLAP`)
-- `POST /chat` — `{"question": "..."}` → `{"answer": "...", "sources": [...]}`
+- `POST /chat` — `{"question": "..."}` → `{"answer": "...", "sources": [...]}` (optional `thread_id` / clarification)
 - `GET /retrieve` — debug endpoint; returns raw retrieved contexts and metadata
 - `POST /evaluate` — runs RAGAS evaluation (RAGAS pinned in `requirements.txt`)
-- `GET /webhooks/whatsapp` — ping / integration hints (WhatsApp)
-- `POST /webhooks/whatsapp` — inbound message JSON for RAG reply (WhatsApp)
+- `GET` / `POST` `/webhooks/whatsapp` — integration hints and inbound message JSON for RAG reply
+- `GET` / `POST` / `PUT` `/whatsapp/allowlist` — manage allowed phone numbers
 
 ### WhatsApp deployment note
 
@@ -139,23 +145,24 @@ Typical edge setup: **GOWA** (Docker) on port **3000** and **Flask API** on **80
 **Framework:** React 19 + TypeScript + Vite + Tailwind CSS
 
 **Key components:**
+- **Documents:** file queue (must click **index queue**; rows go Pending → Processing → Indexed/Error), top progress card, `IndexFragmentBadge`, `GET /stats` on header (`fetchStats` with `cache: 'no-store'`). After each successful ingest, the UI **reconciles** fragment count using the **`chunk_count` field** from the ingest JSON (same process that wrote) so the chip does not stay at 0 if `GET /stats` lags. Initial load uses `statsLoading` so “0” is not shown as the true total before the first `/stats`.
 - Chat interface with message history and markdown rendering
-- Document upload with drag-and-drop
+- **Configurations** (tab): `SystemPromptsPanel` for `GET`/`PUT` `/config/prompts`
 - Retrieval debug viewer (shows contexts used for answer)
 - RAGAS evaluation section (displays metrics and per-question results)
-- When WhatsApp is enabled, chat footer can show polling mode and webhook URL (`/config` fields `whatsapp_*`)
+- **WhatsApp** settings view (allowlist, hints); when WhatsApp is enabled, chat footer can show polling mode and webhook URL (`/config` fields `whatsapp_*`)
 - Responsive layout with dark/light mode support
 
 **Configuration:**
-- API base URL via `VITE_API_BASE_URL` env var (defaults to `http://127.0.0.1:3333`)
+- API base URL via `VITE_API_BASE_URL` — empty string means **same origin** (SPAs behind Nginx on one host); if unset, code defaults to `http://127.0.0.1:3333`
 
 ### Data Flow
 
 1. **Ingestion:**
-   - User uploads PDF/MD/TXT → `/ingest` multipart endpoint
-   - `preprocess.py` loads and extracts text (PDF: PyMuPDF or PyPDF; MD/TXT: direct read)
+   - User queues files in the UI and runs **index queue** → `POST /ingest` multipart (field `files`)
+   - `preprocess.py` in a worker thread loads and extracts text; `RAGService.ingest_text` runs in a worker thread, serialized by a write lock
    - Text split into chunks (recursively by paragraphs, lines, sentences)
-   - Each chunk → OpenAI embedding → stored in Chroma with metadata
+   - Each batch → OpenAI embedding → `ChromaStore` with metadata; response includes **total** `chunk_count` for the client
 
 2. **Retrieval:**
    - User asks question → query vector via OpenAI embeddings
@@ -180,9 +187,10 @@ Typical edge setup: **GOWA** (Docker) on port **3000** and **Flask API** on **80
 
 ## Key Considerations
 
-- **Environment variables are mandatory:** Backend will not initialize without `OPENAI_API_KEY`. Frontend API default is `http://127.0.0.1:3333` if `VITE_API_BASE_URL` is not set.
+- **Environment variables are mandatory:** Backend will not initialize without `OPENAI_API_KEY`. Frontend: if `VITE_API_BASE_URL` is **not set** in the env file, the bundle defaults to `http://127.0.0.1:3333`. If it is set to an **empty string**, requests use the **current page origin** (typical for production behind a reverse proxy).
+- **Ingest response vs /stats:** Prefer **`chunk_count` on the `POST /ingest` response** to update the UI total; `GET /stats` may momentarily return a lower value (multiple workers, timing).
 - **Chroma persistence:** Vector DB is persisted on disk in the directory specified by `CHROMA_PERSIST_DIRECTORY` (defaults to `backend/chroma_db`). Clearing requires calling `POST /ingest/reset`.
-- **Chunking params affect indexing:** Changing `CHUNK_SIZE` or `CHUNK_OVERLAP` requires calling `POST /ingest/reset` and re-uploading documents to regenerate embeddings. Changes to `TOP_K` or MMR params only require restarting the backend.
+- **Chunking params affect indexing:** Changing `CHUNK_SIZE` or `CHUNK_OVERLAP` requires calling `POST /ingest/reset` and re-uploading documents to regenerate embeddings. The same applies when changing **`OPENAI_EMBEDDING_MODEL`** or **`OPENAI_EMBEDDING_DIMENSIONS`** (vector size must match the index). Changes to `TOP_K` or MMR params only require restarting the backend.
 - **Large PDFs:** The default PDF-GenAI-Challenge.pdf is ~600+ pages. Default chunk size is 1280 with 20% overlap to handle this gracefully. Adjust `CHUNK_SIZE`, `TOP_K`, `MMR_FETCH_K` if needed.
 - **RAGAS evaluation:** Included in `requirements.txt`. Evaluation is slow (several minutes) due to LLM calls per metric, per question.
 - **WhatsApp:** Configure `WHATSAPP_*` in `backend/.env`; details in `docs/VARIABLES_ENTORNO.md` and `docs/ARQUITECTURA.md`. No Docker Evolution stack in this repo.

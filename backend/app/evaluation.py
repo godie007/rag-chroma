@@ -86,9 +86,13 @@ async def run_ragas_evaluation_async(
     llm = LangchainLLMWrapper(
         ChatOpenAI(model=settings.openai_chat_model, temperature=0, **common)
     )
-    embeddings = LangchainEmbeddingsWrapper(
-        OpenAIEmbeddings(model=settings.openai_embedding_model, **common)
-    )
+    emb_kw: dict[str, Any] = {
+        "model": settings.openai_embedding_model,
+        **common,
+    }
+    if settings.openai_embedding_dimensions is not None:
+        emb_kw["dimensions"] = settings.openai_embedding_dimensions
+    embeddings = LangchainEmbeddingsWrapper(OpenAIEmbeddings(**emb_kw))
 
     metrics = [faithfulness, answer_relevancy, context_precision, context_recall]
     result = await aevaluate(

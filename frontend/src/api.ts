@@ -161,6 +161,8 @@ export type StatsResponse = {
 export type ConfigPublic = {
   openai_chat_temperature: number
   openai_chat_max_output_tokens: number
+  openai_embedding_model: string
+  openai_embedding_dimensions: number | null
   chunk_size: number
   chunk_overlap: number
   chunk_min_chars: number

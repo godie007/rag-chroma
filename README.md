@@ -11,13 +11,17 @@ La aplicación web ofrece tres vistas principales, alineadas con el flujo de tra
 
 | Archivo en `docs/images/` | Vista | Funcionalidades que se observan |
 |----------------------------|--------|----------------------------------|
-| `homePage.png` | **Documentos** | Subida de archivos (PDF, Markdown, TXT), cola de procesamiento, **Vaciar índice** con confirmación, parámetros de recuperación y chunking desde el servidor (`/config`), estado del índice (fragmentos, colección). |
+| `homePage.png` | **Documentos** | Subida (PDF, Markdown, TXT), **cola** (Pendiente → Indexado), botón **Indexar cola**, panel de progreso por archivos, chip de fragmentos (`GET /stats`), listado de fuentes en el índice, **Vaciar índice** con confirmación, parámetros vía `GET /config`. | 
 | `chatBotPage.png` | **Chat** | Conversación con respuestas ancladas al material indexado, historial, **fuentes** (extractos) por mensaje, estado de WhatsApp si está activo (`/config`), `/health`. |
 | `EvaluateRAGASPage.png` | **Evaluación** | Ejecución de **RAGAS** vía `POST /evaluate`, dataset (p. ej. `evals/sample_eval.jsonl`), métricas agregadas y desglose por pregunta. |
+| (sin captura) | **WhatsApp** | Referencia a integración y lista de allowlist; instrucciones del modelo se editan en **Configuraciones**. |
+| (sin captura) | **Configuraciones** | Instrucciones de sistema (prompts) por canal **web** y **WhatsApp** vía `GET`/`PUT` `/config/prompts` (archivo en disco en el backend). |
 
 ### Vista Documentos
 
-Gestión del corpus: arrastra o selecciona archivos, revisa la cola, indexa por lotes y, si cambias chunking o quieres rehacer embeddings, vacía la persistencia de Chroma. La columna lateral resume la configuración efectiva del API para chunk size, overlap, MMR y umbrales L2.
+Gestión del corpus: añade archivos a la cola, pulsa **Indexar cola** (los documentos quedan en *Pendiente* hasta entonces), revisa el progreso y el mensaje al finalizar, y vuelve a indexar o vacía el índice si cambias chunking. La columna lateral resume la configuración efectiva del API (chunk size, overlap, MMR, umbrales L2, etc.).
+
+**Contador de fragmentos e ingesta:** el chip del encabezado usa `GET /stats` (`cache: 'no-store'` en el cliente). Tras `POST /ingest`, el backend responde con **`chunk_count`** (total de vectores en Chroma *en ese mismo proceso*). La UI reconcilia fragmentos a partir de esa respuesta y de `/stats` para no mostrar 0 mientras el índice ya tiene datos. Detalle técnico: [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md) (sección API e ingesta).
 
 <p align="center">
   <img src="docs/images/homePage.png" alt="Vista Documentos: subida de archivos, cola de ingesta, parámetros de recuperación y vaciado del índice" width="920" />
@@ -49,7 +53,7 @@ Evaluación offline sobre un fichero `.jsonl` con pares pregunta / *ground truth
 
 1. **Preprocesado:** lectura de `.txt` / `.md` / `.pdf`. Los PDF usan **PyMuPDF** (mejor orden de lectura) con **pypdf** como respaldo; se filtran líneas dominadas por `|` (artefactos típicos de figuras vectoriales) para que el texto se parezca más al cuerpo del libro. Tras actualizar esta lógica, **vacia el índice y vuelve a ingerir** los PDF ya subidos.
 2. **Fragmentación:** `RecursiveCharacterTextSplitter` con `CHUNK_SIZE`, `CHUNK_OVERLAP` y separadores pensados para texto extraído de PDF (párrafos, líneas, frases).
-3. **Embeddings + índice:** embeddings OpenAI → almacenamiento en Chroma persistido en disco.
+3. **Embeddings + índice:** embeddings OpenAI (`OPENAI_EMBEDDING_MODEL`, opcional `OPENAI_EMBEDDING_DIMENSIONS` para MRL con `text-embedding-3-*`) → almacenamiento en Chroma persistido en disco. **Si cambias modelo o dimensiones,** vacía el índice (`POST /ingest/reset`) y vuelve a ingerir.
 4. **Recuperación:** candidatos por similitud L2; se descartan los que superan `RETRIEVE_MAX_L2_DISTANCE`. El resto se **ordena de más a menos relevante** y se recorta con `RETRIEVE_RELEVANCE_MARGIN` (distancia ≤ mejor + margen). Opcionalmente `RETRIEVE_ELBOW_L2_GAP` corta cuando hay un salto grande entre dos vecinos consecutivos. Sobre el conjunto resultante, **MMR** (opcional) elige hasta `TOP_K` y el orden final vuelve a ser **por relevancia** (menor distancia primero) para el prompt.
 5. **Generación:** prompts de sistema y plantillas de usuario en **`backend/app/prompts.py`**; el modelo chat es configurable por `.env`. Sin contexto documental recuperado se usa un system prompt distinto para no inventar contenido del índice. Las respuestas al usuario final evitan jerga técnica (“fragmentos”, “RAG”): lenguaje de profesional a usuario.
 
@@ -85,7 +89,9 @@ También puedes usar `chmod +x run_dev.sh && ./run_dev.sh` desde `backend/`.
 
 Arranca desde `backend/` para que se cargue `backend/.env`.
 
-**Rutas útiles:** `GET /health`, `POST /ingest` (multipart, campo `files`), `POST /ingest/reset` (borra la colección Chroma; necesario si cambias chunking y quieres re-embeddar), `POST /chat` (JSON `{"question":"..."}`), `GET /retrieve?q=...` (solo contextos, útil para evaluación), `POST /evaluate` (query opcional `eval_relative_path=evals/sample_eval.jsonl`) — ejecuta RAGAS en el servidor; tarda varios minutos. **WhatsApp:** `GET /webhooks/whatsapp` (comprobación), `POST /webhooks/whatsapp` (mensaje entrante JSON; opcional `WHATSAPP_WEBHOOK_SECRET`).
+**Rutas útiles:** `GET /health`, `GET /stats`, `GET /stats/sources` (fuentes listadas en el índice), `GET /config`, `GET`/`PUT`/`DELETE` `/config/prompts` (system prompts por canal, sin reiniciar), `POST /ingest` (multipart, campo `files`; cuerpo de respuesta incluye `files_processed`, `chunks_added`, `messages`, `chunk_count`, `ready`), `POST /ingest/delete-source` (quitar una fuente por nombre), `POST /ingest/reset` (borra la colección Chroma; necesario si cambias chunking y quieres re-embeddar), `POST /chat` (JSON `{"question":"..."}`), `GET /retrieve?q=...` (solo contextos, útil para evaluación), `POST /evaluate` (query opcional `eval_relative_path=evals/sample_eval.jsonl`) — ejecuta RAGAS en el servidor; tarda varios minutos. **WhatsApp:** `GET/POST` `/webhooks/whatsapp`, `GET`/`POST`/`PUT` `/whatsapp/allowlist` (ver `.env`).
+
+`POST /ingest` aplica carga y chunking en **hilo** (`asyncio.to_thread`) para no bloquear el *event loop*; subidas largas (PDFs muy grandes) siguen ocupando al worker hasta completar; Nginx en producción usa `proxy_read_timeout` alto (ver `scripts/nginx-rag.conf`).
 
 **Ajuste para PDFs muy largos** (p. ej. `PDF-GenAI-Challenge.pdf`, ~600+ páginas): por defecto `CHUNK_SIZE=1280`, `CHUNK_OVERLAP=256` (~20 %), `TOP_K=6`, `MMR_FETCH_K=80`, `MMR_LAMBDA=0.91`. Si cambias `CHUNK_SIZE` u `CHUNK_OVERLAP`, usa **Vaciar índice** y vuelve a ingerir el PDF. Cambios solo de `TOP_K`/MMR: reinicia uvicorn.
 
@@ -98,7 +104,8 @@ La **UI** incluye la sección «Evaluación RAGAS» que llama a `POST /evaluate`
 ```bash
 cd frontend
 cp .env.example .env
-# Opcional: VITE_API_BASE_URL si el API no está en 127.0.0.1:3333
+# Opcional: VITE_API_BASE_URL (p. ej. http://127.0.0.1:3333 o vacío = mismo origen
+#   detrás de Nginx, con las rutas del API bajo /api/)
 
 npm install
 npm run dev
@@ -166,7 +173,7 @@ curl -s -X POST "http://127.0.0.1:3333/evaluate?eval_relative_path=evals/sample_
 | **GitHub Actions** | cloud | Orquesta el deployment en push a `main` |
 | **Self-Hosted Runner** | Jetson Nano (192.168.1.254) | Ejecuta los jobs localmente |
 | **Backend (FastAPI)** | Jetson :3333 | API RAG con Chroma |
-| **Frontend (React)** | Jetson :4444 | UI web |
+| **Frontend (React)** | `npm run dev` :4444 en desarrollo; en producción suele ser estático en Nginx (`/var/www/rag`) | UI web |
 | **WhatsApp Bridge** | Jetson :8090 | Integración con GOWA |
 
 ### Configuración del Runner
@@ -188,51 +195,26 @@ sudo ./svc.sh install && sudo ./svc.sh start
 
 ### Workflow de Deployment
 
-```yaml
-# .github/workflows/deploy.yml
-name: Deploy to Jetson
-on:
-  push:
-    branches: [main]
+El workflow real está en [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) (resumen):
 
-jobs:
-  deploy:
-    runs-on: self-hosted  # → Jetson Nano
+1. **Build del frontend** (`npm ci` y `npm run build` en `frontend/`, o falla si no hay Node y no hay `dist/`).
+2. **Copia** del contenido de `frontend/dist` a la raíz de documento de Nginx (p. ej. `/var/www/rag`).
+3. **Copia** del backend a una ruta fija en el dispositivo (p. ej. `~/workspace/codla/backend`).
+4. Ajuste de **Nginx** desde `scripts/nginx-rag.conf` (proxy largo a `:3333` para `/ingest` pesado, `client_max_body_size`, etc.).
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Deploy Backend
-        run: |
-          cd $GITHUB_WORKSPACE/backend
-          pip3 install -r requirements.txt --no-deps
-
-      - name: Deploy Frontend
-        run: |
-          cd $GITHUB_WORKSPACE/frontend
-          npm install
-```
-
-### Flujo de Deployment
-
-1. **Push a `main`** → GitHub Actions dispara workflow
-2. **Runner en Jetson** recibe el job
-3. **Checkout** del código en `_work/codla/`
-4. **Instalación** de dependencias (backend + frontend)
-5. **Inicio de servicios** via systemd
+El YAML puede incluir un **paso mínimo** de arranque de API para *health*; en producción suele usarse el **RAG completo** (p. ej. `uvicorn` o **PM2** con el mismo `backend/`) y no un stub. Revisa el archivo del workflow y los scripts del servidor.
 
 ## Estructura
 
 ```
-pruebaScanntech/
+rag-chroma/   (o nombre del clon)
 ├── .github/
 │   └── workflows/
 │       └── deploy.yml      # Workflow de deployment
 ├── backend/
 │   ├── app/
 │   │   ├── main.py, config.py, rag_service.py, preprocess.py, paths.py, evaluation.py
-│   │   ├── prompts.py          # instrucciones LLM
+│   │   ├── prompts.py, prompt_store.py
 │   │   ├── whatsapp_poll.py   # integración WhatsApp
 │   │   └── persistence/       # Chroma
 │   ├── rag-backend.service    # Servicio systemd

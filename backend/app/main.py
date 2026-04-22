@@ -237,6 +237,8 @@ _MAX_PROMPT_CHARS = 200_000
 class ConfigPublic(BaseModel):
     openai_chat_temperature: float
     openai_chat_max_output_tokens: int
+    openai_embedding_model: str
+    openai_embedding_dimensions: int | None
     chunk_size: int
     chunk_overlap: int
     chunk_min_chars: int
@@ -343,6 +345,8 @@ def public_config():
     return ConfigPublic(
         openai_chat_temperature=s.openai_chat_temperature,
         openai_chat_max_output_tokens=s.openai_chat_max_output_tokens,
+        openai_embedding_model=s.openai_embedding_model,
+        openai_embedding_dimensions=s.openai_embedding_dimensions,
         chunk_size=s.chunk_size,
         chunk_overlap=s.chunk_overlap,
         chunk_min_chars=s.chunk_min_chars,

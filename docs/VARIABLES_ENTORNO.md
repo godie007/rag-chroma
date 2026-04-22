@@ -15,7 +15,8 @@ Todas se cargan vía Pydantic Settings (`app.config.Settings`). Los nombres en e
 | `OPENAI_API_KEY` | *(vacío en example)* | Clave secreta de la API OpenAI. | Sin ella el backend arranca pero **no** inicializa el RAG (`/ingest`, `/chat` no operan). Debe permanecer **solo en el servidor**, nunca en el frontend. |
 | `OPENAI_CHAT_MODEL` | `gpt-4o-mini` | Modelo para generar respuestas y para el modo sin fragmentos recuperados. | Buen equilibrio **coste / latencia / calidad** para una demo y para RAG con contexto acotado. Puedes subir a `gpt-4o` si la prueba exige máxima calidad. |
 | `OPENAI_CHAT_TEMPERATURE` | `0.1` | Temperatura del modelo de chat en `/chat` (RAG y sin recuperación). Rango típico 0–2. | Valores **bajos** (p. ej. `0`–`0.2`) favorecen respuestas más estables y alineadas al contexto; sube un poco si quieres redacción menos rígida. La evaluación **RAGAS** en `evaluation.py` usa `temperature=0` en el LLM de métricas, independiente de esta variable. |
-| `OPENAI_EMBEDDING_MODEL` | `text-embedding-3-small` | Modelo de vectores para indexar y consultar. | Dimensión y coste moderados; suficiente para recuperación semántica en documentación técnica y libros. `text-embedding-3-large` mejora a veces la recuperación a costa de precio y tamaño de vector. |
+| `OPENAI_EMBEDDING_MODEL` | `text-embedding-3-small` | Modelo de vectores para indexar y consultar. | Dimensión y coste moderados; suficiente para muchos RAG. Para corpus técnico multilingüe o mayor precisión, `text-embedding-3-large` es la opción fuerte en el mismo ecosistema OpenAI. Tras **cualquier** cambio de modelo o de dimensiones: `POST /ingest/reset` y re-ingerir. |
+| `OPENAI_EMBEDDING_DIMENSIONS` | *(vacío/sin definir)* | Tamaño de vector de salida (**MRL / Matryoshka**) en modelos `text-embedding-3-*`. | Vacío = dimensión **nativa** (p. ej. 1536 en `small`, 3072 en `large`). Valores habituales: **1024** o **256** con `text-embedding-3-large` para ahorrar almacenamiento y mantener buena calidad. Debe alinearse con [la documentación de OpenAI](https://platform.openai.com/docs/guides/embeddings) para el modelo elegido. |
 | `OPENAI_API_BASE` | *(omitida)* | URL base alternativa (p. ej. Azure OpenAI o proxy). | Por defecto el cliente usa la API pública de OpenAI. Solo necesaria si tu clave y tráfico van por otro endpoint compatible. |
 
 ### Chroma (vectores locales)
@@ -96,7 +97,7 @@ Solo las variables con prefijo **`VITE_`** llegan al código del navegador.
 
 | Variable | Valor ejemplo | Definición | Razón del valor por defecto |
 |----------|---------------|------------|------------------------------|
-| `VITE_API_BASE_URL` | `http://127.0.0.1:3333` | URL base del backend FastAPI **sin barra final**. | Misma máquina y puertos por defecto del README (backend en **3333**). En producción sustituye por la URL pública del API. Si no se define, el código usa el valor por defecto embebido en `frontend/src/api.ts`. |
+| `VITE_API_BASE_URL` | `http://127.0.0.1:3333` o vacía | URL base del backend FastAPI **sin barra final**. | **Sin definir** (variable ausente en `.env`): el código en `api.ts` usa `http://127.0.0.1:3333`. **Cadena vacía** (`VITE_API_BASE_URL=` en `.env`): peticiones al **mismo origen** del navegador (útil si el build estático va por Nginx y el API bajo el mismo host, p. ej. `location /api/`). En producción con otro host, pon la URL pública del API. |
 
 **Seguridad:** nunca pongas `OPENAI_API_KEY` ni secretos en el frontend; solo esta URL pública del backend.
 
@@ -105,6 +106,6 @@ Solo las variables con prefijo **`VITE_`** llegan al código del navegador.
 ## Referencias
 
 - Definición técnica de campos: `backend/app/config.py`
-- Instrucciones del LLM (no son variables de entorno; se editan en código): `backend/app/prompts.py`
+- Instrucciones del LLM: defaults en `backend/app/prompts.py`; sobreescritura persistente (UI **Configuraciones** o `GET`/`PUT` `/config/prompts`) vía almacenamiento de fichero en el backend (`prompt_store`).
 - Plantilla copiable: `backend/.env.example`, `frontend/.env.example`
 - Arquitectura y diagramas: [ARQUITECTURA.md](./ARQUITECTURA.md)

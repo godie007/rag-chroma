@@ -468,6 +468,34 @@ export function DocumentsView({
               </div>
               <div>
                 <label className="text-[10px] font-bold text-on-surface-variant uppercase mb-1 block">
+                  Modelo de embeddings
+                </label>
+                <input
+                  className="w-full bg-surface-container-lowest border-none rounded-lg text-sm font-bold text-primary focus:ring-2 focus:ring-primary/20 opacity-90"
+                  type="text"
+                  readOnly
+                  disabled={!config}
+                  value={config?.openai_embedding_model ?? ''}
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-on-surface-variant uppercase mb-1 block">
+                  Dimensiones embeddings (MRL; vacío = nativo)
+                </label>
+                <input
+                  className="w-full bg-surface-container-lowest border-none rounded-lg text-sm font-bold text-primary focus:ring-2 focus:ring-primary/20 opacity-90"
+                  type="text"
+                  readOnly
+                  disabled={!config}
+                  value={
+                    config?.openai_embedding_dimensions != null
+                      ? String(config.openai_embedding_dimensions)
+                      : '— (nativo)'
+                  }
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-on-surface-variant uppercase mb-1 block">
                   Tamaño de fragmento (caracteres)
                 </label>
                 <input

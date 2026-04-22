@@ -46,10 +46,13 @@ class RAGService:
         common_openai: dict[str, Any] = {"api_key": settings.openai_api_key}
         if settings.openai_api_base:
             common_openai["base_url"] = settings.openai_api_base
-        self.embeddings = OpenAIEmbeddings(
-            model=settings.openai_embedding_model,
+        emb_kw: dict[str, Any] = {
+            "model": settings.openai_embedding_model,
             **common_openai,
-        )
+        }
+        if settings.openai_embedding_dimensions is not None:
+            emb_kw["dimensions"] = settings.openai_embedding_dimensions
+        self.embeddings = OpenAIEmbeddings(**emb_kw)
         self.llm = ChatOpenAI(
             model=settings.openai_chat_model,
             temperature=settings.openai_chat_temperature,

@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     # Límite de tokens de salida del chat RAG (respuestas largas / prompts detallados).
     openai_chat_max_output_tokens: int = Field(default=2096, ge=256, le=128_000)
     openai_embedding_model: str = "text-embedding-3-small"
+    # text-embedding-3-* (MRL / Matryoshka): p. ej. 256, 1024 con large; 512 con small. None = nativas del modelo.
+    openai_embedding_dimensions: int | None = None
     openai_api_base: str | None = None
     chroma_persist_directory: str = "./chroma_db"
     chroma_collection_name: str = "internal_knowledge"
@@ -92,6 +94,22 @@ class Settings(BaseSettings):
     @classmethod
     def strip_whatsapp_allowed_senders(cls, v: str) -> str:
         return v.strip().strip("\ufeff").strip()
+
+    @field_validator("openai_embedding_dimensions", mode="before")
+    @classmethod
+    def empty_embedding_dims(cls, v: Any) -> Any:
+        if v is None or v == "" or (isinstance(v, str) and not str(v).strip()):
+            return None
+        return v
+
+    @field_validator("openai_embedding_dimensions", mode="after")
+    @classmethod
+    def check_embedding_dims(cls, v: int | None) -> int | None:
+        if v is None:
+            return None
+        if v < 1 or v > 4096:
+            raise ValueError("OPENAI_EMBEDDING_DIMENSIONS must be 1-4096 or empty")
+        return v
 
     @field_validator("openai_chat_model", "openai_embedding_model", mode="after")
     @classmethod

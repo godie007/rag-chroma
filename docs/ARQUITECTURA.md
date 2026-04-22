@@ -103,6 +103,7 @@ flowchart LR
 | `persistence/chroma.py` | `ChromaStore`: cliente LangChain Chroma, permisos y prueba de escritura en disco, ingesta por lotes con reintento ante sqlite readonly, conteo y borrado de la carpeta de persistencia. |
 | `prompts.py` | Instrucciones de sistema (`SYSTEM_RAG`, `SYSTEM_NO_RETRIEVAL`) y plantillas de mensaje de usuario (`build_rag_user_message`, etc.). |
 | `preprocess.py` | Carga de documentos, limpieza PDF, segmentación por fences Markdown, fusión de trozos cortos. |
+| `prompt_store.py` (y rutas de prompts en `main.py`) | Lectura/escritura de system prompts editables; no reinicia el backend. |
 | `evaluation.py` | Pipeline RAGAS asíncrono sobre el mismo `RAGService`. |
 | `paths.py` | Resolución segura de rutas bajo `evals/`. |
 | `whatsapp_poll.py` | Integración WhatsApp: polling a la API remota, webhook entrante, deduplicación, eco de respuestas del bot, envío `POST /send/text`. |
@@ -258,6 +259,7 @@ Definidas en `backend/app/config.py` (Pydantic Settings). Los nombres en **MAYÚ
 | `OPENAI_CHAT_MODEL` | `openai_chat_model` | `gpt-4o-mini` | Modelo de chat para respuestas y ramas sin contexto. |
 | `OPENAI_CHAT_TEMPERATURE` | `openai_chat_temperature` | `0.1` | Temperatura del chat RAG (`/chat`); validado entre 0 y 2. |
 | `OPENAI_EMBEDDING_MODEL` | `openai_embedding_model` | `text-embedding-3-small` | Modelo de embeddings para índice y consultas. |
+| `OPENAI_EMBEDDING_DIMENSIONS` | `openai_embedding_dimensions` | *vacío* | Dimensiones MRL (p. ej. 1024) con `text-embedding-3-large`; vacío = nativas. Cambiar implica reindexar. |
 | `OPENAI_API_BASE` | `openai_api_base` | `None` | Base URL opcional (Azure OpenAI u otro compatible). |
 | `CHROMA_PERSIST_DIRECTORY` | `chroma_persist_directory` | `./chroma_db` | Carpeta de persistencia Chroma. Las rutas **relativas** se resuelven respecto a **`backend/`**, no al CWD de uvicorn. |
 | `CHROMA_COLLECTION_NAME` | `chroma_collection_name` | `internal_knowledge` | Nombre de la colección vectorial. |
@@ -285,7 +287,7 @@ Definidas en `backend/app/config.py` (Pydantic Settings). Los nombres en **MAYÚ
 
 | Variable | Descripción |
 |----------|-------------|
-| `VITE_API_BASE_URL` | URL base del API FastAPI (sin barra final). Por defecto en código: `http://127.0.0.1:3333`. |
+| `VITE_API_BASE_URL` | URL base del API FastAPI (sin barra final). En código, si se define la variable **vacía** (`VITE_API_BASE_URL=`), el frontend usa el **mismo origen** que la página (útil con Nginx: sitio en `https://…` y API en `https://…/api/…`). Valor no definido: por defecto `http://127.0.0.1:3333` en el bundle. |
 
 Vite solo expone al bundle variables que empiezan por `VITE_`.
 
@@ -296,9 +298,12 @@ Vite solo expone al bundle variables que empiezan por `VITE_`.
 | Método | Ruta | Uso |
 |--------|------|-----|
 | `GET` | `/health` | Estado del servicio y si el RAG está inicializado. |
-| `GET` | `/stats` | `chunk_count`, `collection`, `ready`. |
+| `GET` | `/stats` | `chunk_count`, `collection`, `ready`. Puede leerse justo **después** de `POST /ingest` con un valor aún bajo o 0 (proxy, varios workers, timing SQLite); el cliente y la respuesta de ingesta alivian esto. |
+| `GET` | `/stats/sources` | Lista de nombres de fuente distintas en metadatos Chroma. |
 | `GET` | `/config` | Parámetros públicos de chunking y recuperación (sin secretos). |
-| `POST` | `/ingest` | Multipart, campo `files`: indexa PDF/MD/TXT. |
+| `GET` / `PUT` / `DELETE` | `/config/prompts` | System prompts por canal (web, WhatsApp, evaluación); persisten en un JSON en el backend. |
+| `POST` | `/ingest` | Multipart, campo `files`: indexa PDF/MD/TXT. Carga y chunking pesados se ejecutan en **hilo** para no bloquear el *event loop*. Respuesta JSON: `files_processed`, `chunks_added`, `messages[]`, además **`chunk_count`** (total de vectores en Chroma *tras* la operación, mismo proceso que escribió) y `ready`. |
+| `POST` | `/ingest/delete-source` | Body JSON con `source`: borra vectores cuyo metadato `source` coincide. |
 | `POST` | `/ingest/reset` | Borra persistencia Chroma en disco y recrea índice vacío. |
 | `POST` | `/chat` | Body JSON `{"question": "..."}` → `answer` + `sources`. |
 | `GET` | `/retrieve` | Depuración: contextos recuperados para `q`. |
@@ -307,6 +312,13 @@ Vite solo expone al bundle variables que empiezan por `VITE_`.
 | `POST` | `/webhooks/whatsapp` | Cuerpo JSON con mensaje(s) entrante(s); opcional secreto vía cabecera (ver `WHATSAPP_WEBHOOK_SECRET`). |
 
 `GET /config` expone, entre otros, `whatsapp_polling_active`, `whatsapp_webhook_active`, `whatsapp_poll_mode`, `whatsapp_api_base_url`, `whatsapp_poll_interval_sec` (sin secretos).
+
+---
+
+## 10B. Ingesta, UI y contador de fragmentos
+
+- Tras un `POST /ingest` correcto, el JSON incluye **`chunk_count`** = `collection_count()` de Chroma en el **mismo proceso** que acaba de escribir; es el valor que debe priorizar el frontend si `GET /stats` momentáneamente devuelve 0 o menos.
+- En el **frontend**, `fetchStats` usa `cache: 'no-store'`; el encabezado no muestra “0 fragmentos” como total definitivo **hasta** el primer `GET /stats` resuelto; la ingesta aplica *patch* y reconciliación con el total de la respuesta de `POST /ingest` y con `chunks_added` para no regresar el contador.
 
 ---
 
