@@ -1,6 +1,7 @@
 import json
 import logging
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -14,13 +15,12 @@ try:
 except ImportError:
     from langchain_community.vectorstores.utils import maximal_marginal_relevance
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-
 from app.config import Settings
 from app.persistence import ChromaStore
-from app.preprocess import chunk_text_for_ingest
+from app.preprocess import build_ingest_recursive_splitter, chunk_text_for_ingest
 from app.prompts import (
     RETRIEVAL_PROFILE_CLASSIFY_SYSTEM,
+    build_contextual_chunk_user_message,
     build_no_retrieval_user_message,
     build_rag_user_message,
 )
@@ -34,6 +34,15 @@ GenerateChannel = Literal["web", "whatsapp"]
 class SourceChunk:
     content: str
     metadata: dict[str, Any]
+
+    @staticmethod
+    def from_stored_document(doc: Document) -> "SourceChunk":
+        """Texto mostrado al LLM / UI: ``original_text`` si existe (ingesta contextual); si no, ``page_content``."""
+        meta = dict(doc.metadata)
+        raw = meta.get("original_text")
+        if isinstance(raw, str) and raw.strip():
+            return SourceChunk(content=raw, metadata=meta)
+        return SourceChunk(content=doc.page_content, metadata=meta)
 
 
 class RAGService:
@@ -60,12 +69,17 @@ class RAGService:
             **common_openai,
         )
         self._retrieval_profile_llm = self.llm.bind(temperature=0, max_tokens=64)
-        self.splitter = RecursiveCharacterTextSplitter(
-            chunk_size=settings.chunk_size,
-            chunk_overlap=settings.chunk_overlap,
-            length_function=len,
-            separators=["\n\n", "```", "\n", ". ", "; ", " ", ""],
+        self.splitter = build_ingest_recursive_splitter(
+            settings.chunk_size, settings.chunk_overlap
         )
+        self._contextual_llm: ChatOpenAI | None = None
+        if settings.enable_contextual_retrieval:
+            self._contextual_llm = ChatOpenAI(
+                model=settings.contextual_retrieval_model,
+                temperature=0.0,
+                max_tokens=settings.contextual_retrieval_max_output_tokens,
+                **common_openai,
+            )
         self._chroma = ChromaStore(settings, self.embeddings)
         # Una sola escritura a Chroma a la vez (SQLite + embeddings), evita contienda y bloqueos raros.
         self._index_write_lock = threading.Lock()
@@ -115,17 +129,25 @@ class RAGService:
                 merge_min_chars=self.settings.chunk_min_chars,
                 merge_hard_max=merge_hard_max,
             )
+            to_index = (
+                self._contextualize_for_ingest(text_norm, chunk_strings)
+                if (self._contextual_llm and chunk_strings)
+                else chunk_strings
+            )
 
             # --- 4. Empaquetar cada trozo como Document (contenido + metadatos para citas) ---
             documents: list[Document] = []
-            for index, content in enumerate(chunk_strings):
+            for index, orig in enumerate(chunk_strings):
+                meta: dict[str, Any] = {
+                    "source": source_name,
+                    "chunk_id": f"{source_name}#{index}",
+                }
+                if self._contextual_llm:
+                    meta["original_text"] = orig
                 documents.append(
                     Document(
-                        page_content=content,
-                        metadata={
-                            "source": source_name,
-                            "chunk_id": f"{source_name}#{index}",
-                        },
+                        page_content=to_index[index] if index < len(to_index) else orig,
+                        metadata=meta,
                     )
                 )
 
@@ -145,6 +167,47 @@ class RAGService:
                 )
 
             return len(documents)
+
+    def _contextualize_for_ingest(self, full_document: str, chunks: list[str]) -> list[str]:
+        """Antepone contexto (LLM) a cada trozo para embedding; concurrencia acotada."""
+        if not self._contextual_llm or not (full_document or "").strip() or not chunks:
+            return chunks
+        cap = self.settings.contextual_retrieval_max_doc_chars
+        fd = full_document[:cap]
+        n = len(chunks)
+        conc = min(max(1, self.settings.contextual_retrieval_concurrency), n)
+
+        def one(idx: int, ch: str) -> tuple[int, str]:
+            c = (ch or "").strip()
+            if not c:
+                return idx, ch
+            try:
+                msg = self._contextual_llm.invoke(
+                    [
+                        {
+                            "role": "user",
+                            "content": build_contextual_chunk_user_message(fd, ch),
+                        }
+                    ]
+                )
+                head = self._llm_message_text(msg).strip()
+                if not head:
+                    return idx, ch
+                return idx, f"{head}\n\n{ch}"
+            except Exception as exc:
+                logger.warning("Contextualize chunk %s falló: %s", idx, exc)
+                return idx, ch
+
+        if n == 1:
+            _, out = one(0, chunks[0])
+            return [out]
+        out: list[str] = [""] * n
+        with ThreadPoolExecutor(max_workers=conc) as pool:
+            futures = [pool.submit(one, i, c) for i, c in enumerate(chunks)]
+            for fut in as_completed(futures):
+                i, text = fut.result()
+                out[i] = text
+        return out
 
     def _search_sorted_within_l2_cap(
         self,
@@ -298,10 +361,7 @@ class RAGService:
             selected_pairs = ranked[:k]
 
         selected_pairs.sort(key=lambda pair: pair[1])
-        return [
-            SourceChunk(content=doc.page_content, metadata=dict(doc.metadata))
-            for doc, _ in selected_pairs
-        ]
+        return [SourceChunk.from_stored_document(doc) for doc, _ in selected_pairs]
 
     def retrieve(
         self,

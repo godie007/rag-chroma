@@ -141,6 +141,47 @@ def merge_short_split_fragments(
     return out
 
 
+def build_ingest_recursive_splitter(
+    chunk_size: int, chunk_overlap: int
+) -> RecursiveCharacterTextSplitter:
+    """Separadores de mayor a menor estructura (normas, libros, Markdown). `keep_separator` conserva encabezados en el trozo."""
+    return RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        length_function=len,
+        is_separator_regex=False,
+        keep_separator=True,
+        separators=[
+            "\n\n## ",
+            "\n\n### ",
+            "\n\n#### ",
+            "\n\nCapítulo ",
+            "\n\nArt. ",
+            "\n\nArtículo ",
+            "\n\nNumeral ",
+            "\n\n",
+            "\n",
+            ". ",
+            " ",
+            "",
+        ],
+    )
+
+
+def build_ingest_code_splitter(
+    chunk_size: int, chunk_overlap: int
+) -> RecursiveCharacterTextSplitter:
+    """Bloques ```; separadores acordes a código sin forzar estructura de prosa normativa."""
+    return RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        length_function=len,
+        is_separator_regex=False,
+        keep_separator=True,
+        separators=["\n\n", "\n", " ", ""],
+    )
+
+
 def _iter_markdown_fenced_segments(text: str) -> list[tuple[Literal["prose", "fence"], str]]:
     segments: list[tuple[Literal["prose", "fence"], str]] = []
     i = 0
@@ -174,13 +215,10 @@ def chunk_text_for_ingest(
     chunk_overlap: int,
     merge_min_chars: int,
     merge_hard_max: int,
+    code_splitter: RecursiveCharacterTextSplitter | None = None,
 ) -> list[str]:
-    code_splitter = RecursiveCharacterTextSplitter(  # trocear código dentro de fences
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        length_function=len,
-        separators=["\n\n", "\n", " ", ""],
-    )
+    if code_splitter is None:
+        code_splitter = build_ingest_code_splitter(chunk_size, chunk_overlap)
     raw: list[str] = []
     for kind, body in _iter_markdown_fenced_segments(text):  # separar prosa vs ```código```
         b = body.strip() if kind == "fence" else body

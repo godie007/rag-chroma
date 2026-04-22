@@ -27,17 +27,24 @@ class Settings(BaseSettings):
     chroma_persist_directory: str = "./chroma_db"
     chroma_collection_name: str = "internal_knowledge"
     chroma_ingest_batch_size: int = 128
-    chunk_size: int = 1280
-    chunk_overlap: int = 256
+    chunk_size: int = 1400
+    chunk_overlap: int = 280
     chunk_min_chars: int = 400
     chunk_merge_hard_max: int = 0
-    top_k: int = 6
+    top_k: int = 8
     use_mmr: bool = True
-    mmr_fetch_k: int = 80
-    mmr_lambda: float = 0.91
-    retrieve_max_l2_distance: float = 1.3
-    retrieve_relevance_margin: float = 0.10
-    retrieve_elbow_l2_gap: float = 0.0
+    mmr_fetch_k: int = 60
+    mmr_lambda: float = 0.75
+    retrieve_max_l2_distance: float = 1.25
+    retrieve_relevance_margin: float = 0.12
+    retrieve_elbow_l2_gap: float = 0.08
+    # En ingesta: antepone 1-2 frases (LLM) a cada trozo para indexar; en lectura se usa
+    # original_text (metadato) para el contexto al LLM y la UI. Coste extra solo al subir docs.
+    enable_contextual_retrieval: bool = False
+    contextual_retrieval_model: str = "gpt-4o-mini"
+    contextual_retrieval_max_output_tokens: int = Field(150, ge=32, le=500)
+    contextual_retrieval_max_doc_chars: int = Field(50_000, ge=2_000, le=200_000)
+    contextual_retrieval_concurrency: int = Field(4, ge=1, le=32)
     # Si es False, no se llama al LLM antes de recuperar (siempre perfil "normal"; ahorra coste/latencia).
     llm_retrieval_profile: bool = True
     # Bucle de clarificación (LangGraph): evaluar si el contexto es ambiguo y preguntar al usuario antes de responder.
@@ -111,7 +118,7 @@ class Settings(BaseSettings):
             raise ValueError("OPENAI_EMBEDDING_DIMENSIONS must be 1-4096 or empty")
         return v
 
-    @field_validator("openai_chat_model", "openai_embedding_model", mode="after")
+    @field_validator("openai_chat_model", "openai_embedding_model", "contextual_retrieval_model", mode="after")
     @classmethod
     def normalize_model_ids(cls, v: str) -> str:
         """Quita espacios/comillas y corrige typos frecuentes (p. ej. gpt-5o-mini → gpt-4o-mini)."""

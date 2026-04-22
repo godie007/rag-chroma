@@ -251,6 +251,7 @@ class ConfigPublic(BaseModel):
     retrieve_max_l2_distance: float
     retrieve_relevance_margin: float
     retrieve_elbow_l2_gap: float
+    enable_contextual_retrieval: bool
     rag_clarification_enabled: bool
     rag_clarification_max_rounds: int
     whatsapp_polling_active: bool
@@ -359,6 +360,7 @@ def public_config():
         retrieve_max_l2_distance=s.retrieve_max_l2_distance,
         retrieve_relevance_margin=s.retrieve_relevance_margin,
         retrieve_elbow_l2_gap=s.retrieve_elbow_l2_gap,
+        enable_contextual_retrieval=s.enable_contextual_retrieval,
         rag_clarification_enabled=s.rag_clarification_enabled,
         rag_clarification_max_rounds=s.rag_clarification_max_rounds,
         whatsapp_polling_active=wa_poll,

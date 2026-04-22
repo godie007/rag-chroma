@@ -175,6 +175,7 @@ export type ConfigPublic = {
   retrieve_max_l2_distance: number
   retrieve_relevance_margin: number
   retrieve_elbow_l2_gap: number
+  enable_contextual_retrieval: boolean
   rag_clarification_enabled: boolean
   rag_clarification_max_rounds: number
   whatsapp_polling_active: boolean

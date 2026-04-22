@@ -375,3 +375,19 @@ def build_rag_user_message(context_block: str, question: str) -> str:
 def build_no_retrieval_user_message(question: str) -> str:
     """Mensaje de usuario cuando no hubo coincidencias en la documentación (coherente con SYSTEM_NO_RETRIEVAL)."""
     return f"User message: {question}"
+
+
+def build_contextual_chunk_user_message(
+    full_document_capped: str, chunk_content: str
+) -> str:
+    """Solo ingesta: sitúa el trozo en el documento para enriquecer el embedding; no se muestra al usuario final."""
+    doc = (full_document_capped or "").strip()
+    chunk = (chunk_content or "").strip()
+    return (
+        "Documento (contexto; puede estar truncado):\n"
+        f"<documento>\n{doc}\n</documento>\n\n"
+        "Fragmento a situar dentro del documento:\n"
+        f"<fragmento>\n{chunk}\n</fragmento>\n\n"
+        "Escribe 1 o 2 frases que ubiquen este fragmento (tema, sección o finalidad) para mejorar la búsqueda. "
+        "Responde SOLO con esas frases, sin título ni preámbulo."
+    )
