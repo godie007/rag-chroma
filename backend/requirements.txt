@@ -38,6 +38,7 @@ langchain-chroma==1.1.0
 langchain-core==1.2.24
 langchain-openai==1.1.12
 langchain-text-splitters==1.1.1
+langgraph==1.1.9
 langsmith==0.7.24
 markdown-it-py==4.0.0
 mdurl==0.1.2

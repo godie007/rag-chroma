@@ -26,7 +26,12 @@ function apiAbsoluteUrl(path: string): string {
 
 export type ChatSource = { content: string; metadata: Record<string, unknown> }
 
-export type ChatResponse = { answer: string; sources: ChatSource[] }
+export type ChatResponse = {
+  answer: string
+  sources: ChatSource[]
+  thread_id: string
+  response_type: 'answer' | 'clarification'
+}
 
 export type IngestResponse = {
   files_processed: number
@@ -110,11 +115,29 @@ export async function deleteIndexedSource(source: string): Promise<DeleteIndexed
   return res.json()
 }
 
-export async function chat(question: string): Promise<ChatResponse> {
+const CHAT_THREAD_KEY = 'rag_chat_thread_id'
+
+export function getChatThreadId(): string | null {
+  if (typeof window === 'undefined' || !window.sessionStorage) return null
+  return window.sessionStorage.getItem(CHAT_THREAD_KEY)
+}
+
+export function setChatThreadId(id: string | null): void {
+  if (typeof window === 'undefined' || !window.sessionStorage) return
+  if (id) window.sessionStorage.setItem(CHAT_THREAD_KEY, id)
+  else window.sessionStorage.removeItem(CHAT_THREAD_KEY)
+}
+
+export async function chat(
+  question: string,
+  threadId: string | null = getChatThreadId()
+): Promise<ChatResponse> {
+  const body: { question: string; thread_id?: string } = { question }
+  if (threadId) body.thread_id = threadId
   const res = await fetch(`${base}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question }),
+    body: JSON.stringify(body),
   })
   await handle(res)
   return res.json()
@@ -147,6 +170,8 @@ export type ConfigPublic = {
   retrieve_max_l2_distance: number
   retrieve_relevance_margin: number
   retrieve_elbow_l2_gap: number
+  rag_clarification_enabled: boolean
+  rag_clarification_max_rounds: number
   whatsapp_polling_active: boolean
   whatsapp_webhook_active: boolean
   whatsapp_poll_mode: 'recent' | 'chats'

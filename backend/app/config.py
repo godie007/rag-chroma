@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     retrieve_elbow_l2_gap: float = 0.0
     # Si es False, no se llama al LLM antes de recuperar (siempre perfil "normal"; ahorra coste/latencia).
     llm_retrieval_profile: bool = True
+    # Bucle de clarificación (LangGraph): evaluar si el contexto es ambiguo y preguntar al usuario antes de responder.
+    rag_clarification_enabled: bool = False
+    rag_clarification_max_rounds: int = Field(3, ge=0, le=8, description="Máx. preguntas de clarificación por hilo en una cadena")
     # Incluye 4444 (Vite según README) y 5173/5174 (puertos por defecto/alternativo de Vite).
     cors_origins: str = (
         "http://localhost:4444,http://127.0.0.1:4444,"

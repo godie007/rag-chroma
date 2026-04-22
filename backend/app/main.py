@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 
@@ -19,6 +20,7 @@ from app.preprocess import (
     sanitize_chunk_text,
     strip_pdf_glyph_tokens,
 )
+from app.clarify_bridge import reset_clarify_graph
 from app.rag_service import RAGService
 from app.whatsapp_allowlist_store import (
     add_allowlist_number,
@@ -119,6 +121,7 @@ async def lifespan(app: FastAPI):
             "WHATSAPP_ENABLED=true pero RAG no disponible: no hay polling ni webhook útil hasta configurar OPENAI_API_KEY"
         )
     yield
+    reset_clarify_graph()
     if _whatsapp_poll_task is not None:
         _whatsapp_poll_task.cancel()
         try:
@@ -148,6 +151,7 @@ app.add_middleware(
 
 class ChatRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=8000)
+    thread_id: str | None = None
 
 
 class SourceOut(BaseModel):
@@ -158,6 +162,8 @@ class SourceOut(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     sources: list[SourceOut]
+    thread_id: str = ""
+    response_type: Literal["answer", "clarification"] = "answer"
 
 
 class IngestResponse(BaseModel):
@@ -240,6 +246,8 @@ class ConfigPublic(BaseModel):
     retrieve_max_l2_distance: float
     retrieve_relevance_margin: float
     retrieve_elbow_l2_gap: float
+    rag_clarification_enabled: bool
+    rag_clarification_max_rounds: int
     whatsapp_polling_active: bool
     whatsapp_webhook_active: bool
     whatsapp_poll_mode: str
@@ -344,6 +352,8 @@ def public_config():
         retrieve_max_l2_distance=s.retrieve_max_l2_distance,
         retrieve_relevance_margin=s.retrieve_relevance_margin,
         retrieve_elbow_l2_gap=s.retrieve_elbow_l2_gap,
+        rag_clarification_enabled=s.rag_clarification_enabled,
+        rag_clarification_max_rounds=s.rag_clarification_max_rounds,
         whatsapp_polling_active=wa_poll,
         whatsapp_webhook_active=wa_ok,
         whatsapp_poll_mode=s.whatsapp_poll_mode,
@@ -545,18 +555,35 @@ async def whatsapp_webhook(request: Request):
 
 @app.post("/chat", response_model=ChatResponse)
 def chat(body: ChatRequest):
-    if is_new_chat_command(body.question):
-        return ChatResponse(answer=new_chat_acknowledgement(), sources=[])
+    from app import clarify_store as _cs
+    from app.clarify_bridge import run_user_turn
+
     rag = require_rag()
-    contexts = rag.retrieve(body.question)
-    answer, used = rag.generate(body.question, contexts, channel="web")
-    answer_out = strip_pdf_glyph_tokens(answer)
+    settings = get_settings()
+    thread_id = (body.thread_id or "").strip() or str(uuid.uuid4())
+    if is_new_chat_command(body.question):
+        _cs.clear_thread(thread_id)
+        return ChatResponse(
+            answer=new_chat_acknowledgement(),
+            sources=[],
+            thread_id=thread_id,
+            response_type="answer",
+        )
+    text, used, rtype = run_user_turn(
+        rag,
+        settings,
+        question=body.question.strip(),
+        thread_id=thread_id,
+        channel="web",
+    )
+    answer_out = strip_pdf_glyph_tokens(text)
     return ChatResponse(
         answer=answer_out,
         sources=[
-            SourceOut(content=sanitize_chunk_text(s.content), metadata=s.metadata)
-            for s in used
+            SourceOut(content=sanitize_chunk_text(s.content), metadata=s.metadata) for s in used
         ],
+        thread_id=thread_id,
+        response_type=rtype,
     )
 
 

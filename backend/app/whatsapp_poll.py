@@ -20,6 +20,7 @@ arranque del worker para no contestar todo el historial de ``/messages/recent`` 
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
 import logging
 import re
@@ -37,6 +38,8 @@ from app.config import Settings
 from app.whatsapp_allowlist_store import effective_allowed_sender_digit_sets
 from app.conversation_commands import NEW_CHAT_COMMAND, is_new_chat_command, new_chat_acknowledgement
 from app.preprocess import strip_pdf_glyph_tokens
+from app.clarify_bridge import run_user_turn
+from app import clarify_store as _clarify_store
 from app.rag_service import RAGService
 
 logger = logging.getLogger("rag_qc.whatsapp")
@@ -481,6 +484,7 @@ async def process_normalized_whatsapp_message(
 
     if is_new_chat_command(content):
         logger.info("WhatsApp comando %s | jid=%s", NEW_CHAT_COMMAND, chat_jid)
+        _clarify_store.clear_thread(chat_jid)
         ack = new_chat_acknowledgement()
         await send_whatsapp_text(
             settings=settings,
@@ -490,9 +494,15 @@ async def process_normalized_whatsapp_message(
         )
         return {"ok": True, "replied": True, "replied_to": phone, "reason": "new_chat_command"}
 
-    contexts = await asyncio.to_thread(rag.retrieve, content)
-    answer, _used = await asyncio.to_thread(
-        rag.generate, content, contexts, channel="whatsapp"
+    answer, _used, _rtype = await asyncio.to_thread(
+        functools.partial(
+            run_user_turn,
+            rag,
+            settings,
+            question=content,
+            thread_id=chat_jid,
+            channel="whatsapp",
+        )
     )
     answer_out = strip_pdf_glyph_tokens(answer)
     logger.info("WhatsApp enviando respuesta [%s] | destino=%s | len=%s", source, phone, len(answer_out))

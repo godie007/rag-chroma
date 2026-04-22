@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { chat, getApiBase, type ChatResponse, type ConfigPublic, type StatsResponse } from '../api'
+import {
+  chat,
+  getApiBase,
+  setChatThreadId,
+  type ChatResponse,
+  type ConfigPublic,
+  type StatsResponse,
+} from '../api'
 import { IndexFragmentBadge } from '../components/IndexFragmentBadge'
 import { MarkdownContent } from '../components/MarkdownContent'
 import { Icon } from '../components/Icon'
@@ -8,6 +15,7 @@ type ChatTurn = {
   role: 'user' | 'assistant'
   text: string
   sources?: ChatResponse['sources']
+  responseType?: ChatResponse['response_type']
   timeLabel?: string
 }
 
@@ -38,9 +46,16 @@ export function ChatView({ config, stats }: { config: ConfigPublic | null; stats
     setSelection(null)
     try {
       const r = await chat(q)
+      setChatThreadId(r.thread_id)
       setTurns((prev) => [
         ...prev,
-        { role: 'assistant', text: r.answer, sources: r.sources, timeLabel: timeLabel() },
+        {
+          role: 'assistant',
+          text: r.answer,
+          sources: r.sources,
+          responseType: r.response_type,
+          timeLabel: timeLabel(),
+        },
       ])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error en el chat')
@@ -81,7 +96,18 @@ export function ChatView({ config, stats }: { config: ConfigPublic | null; stats
                   <div className="w-8 h-8 rounded-lg bg-surface-container-highest shrink-0 flex items-center justify-center">
                     <Icon name="smart_toy" className="text-primary text-sm" />
                   </div>
-                  <div className="flex-1 space-y-6 min-w-0">
+                  <div
+                    className={`flex-1 space-y-6 min-w-0 rounded-2xl pl-1 ${
+                      m.responseType === 'clarification'
+                        ? 'border-l-4 border-amber-500/80 bg-amber-500/5 -ml-1'
+                        : ''
+                    }`.trim()}
+                  >
+                    {m.responseType === 'clarification' ? (
+                      <p className="text-xs font-bold text-amber-800/90 dark:text-amber-200/90 m-0 px-1">
+                        Aclaración
+                      </p>
+                    ) : null}
                     <div className="text-on-surface leading-relaxed prose prose-sm max-w-none prose-p:text-sm prose-p:leading-relaxed prose-headings:font-headline">
                       <MarkdownContent content={m.text} />
                     </div>
@@ -214,6 +240,11 @@ export function ChatView({ config, stats }: { config: ConfigPublic | null; stats
           </div>
           <p className="text-[10px] text-center mt-4 text-on-surface-variant/50 font-medium">
             Comprueba las respuestas con el texto de las fuentes cuando proceda.
+            {config?.rag_clarification_enabled
+              ? ' Si hace falta, el asistente puede pedirte un matiz; el hilo de conversación se mantiene (sessionStorage + thread_id).'
+              : null}
+            {' '}
+            <span className="text-on-surface-variant/40">/nuevo</span> inicia otra conversación.
           </p>
           {config?.whatsapp_webhook_active ? (
             <div className="text-[10px] text-center mt-2 text-on-surface-variant/60 font-medium max-w-xl mx-auto leading-relaxed space-y-1">
