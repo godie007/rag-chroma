@@ -7,5 +7,6 @@ export default defineConfig({
   server: {
     port: 4444,
     strictPort: true,
+    allowedHosts: ['cosmo.codla.co'],
   },
 })
