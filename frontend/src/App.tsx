@@ -10,6 +10,7 @@ import { AppShell, type AppView } from './layout/AppShell'
 import { ChatView } from './views/ChatView'
 import { DocumentsView } from './views/DocumentsView'
 import { EvaluationView } from './views/EvaluationView'
+import { WhatsAppSettingsView } from './views/WhatsAppSettingsView'
 
 function App() {
   const [view, setView] = useState<AppView>('documents')
@@ -118,6 +119,16 @@ function App() {
           aria-hidden={view !== 'evaluation'}
         >
           <EvaluationView stats={stats} onGoDocuments={() => setView('documents')} />
+        </div>
+        <div
+          className={
+            view === 'whatsapp'
+              ? 'flex min-h-0 flex-1 flex-col overflow-y-auto'
+              : 'hidden'
+          }
+          aria-hidden={view !== 'whatsapp'}
+        >
+          <WhatsAppSettingsView config={config} stats={stats} />
         </div>
       </div>
     </AppShell>
