@@ -43,24 +43,44 @@ async function waitForStatsToReach(
 
 /**
  * POST /ingest devuelve el total de fragmentos en el mismo proceso que escribió.
- * GET /stats puede devolver 0 o menos justo después; reforzamos el chip y alineamos con reintentos.
+ * GET /stats a veces devuelve 0 u otro worker; no bajar nunca el contador por un patch incoherente.
+ * No lanzar: si /stats falla, la fila de archivo no debe marcar error (el PDF ya pudo indexarse).
  */
 async function reconcileAfterIngest(
   onRefresh: () => Promise<StatsResponse | null>,
   onRagStatsPatch: (patch: Partial<StatsResponse>) => void,
   r: IngestResponse,
+  priorChunkCount: number,
 ) {
-  if (typeof r.chunk_count !== 'number' || r.chunk_count < 0) {
-    await onRefresh()
-    return
+  const added = r.chunks_added ?? 0
+  let target =
+    typeof r.chunk_count === 'number' && r.chunk_count > 0
+      ? r.chunk_count
+      : added > 0
+        ? priorChunkCount + added
+        : priorChunkCount
+  if (added > 0 && target < priorChunkCount + added) {
+    target = priorChunkCount + added
   }
-  onRagStatsPatch({ chunk_count: r.chunk_count, ready: r.ready ?? true })
-  const s0 = await onRefresh()
-  if (!s0 || s0.chunk_count < r.chunk_count) {
-    onRagStatsPatch({ chunk_count: r.chunk_count, ready: r.ready ?? true })
+  if (target <= 0 && priorChunkCount <= 0 && added > 0) {
+    target = added
   }
-  if (r.chunk_count > 0 && s0 && s0.chunk_count === 0) {
-    await waitForStatsToReach(onRefresh, r.chunk_count, { maxAttempts: 45, delayMs: 1000 })
+  try {
+    if (target > 0) {
+      onRagStatsPatch({ chunk_count: target, ready: r.ready ?? true })
+    }
+    const s0 = await onRefresh()
+    const best = Math.max(
+      s0?.chunk_count ?? 0,
+      target,
+    )
+    if (best > 0) {
+      onRagStatsPatch({ chunk_count: best, ready: s0?.ready ?? r.ready ?? true })
+    }
+  } catch {
+    if (target > 0) {
+      onRagStatsPatch({ chunk_count: target, ready: r.ready ?? true })
+    }
   }
 }
 
@@ -208,6 +228,7 @@ export function DocumentsView({
     setIngestCurrentName(pending[0]?.file.name ?? null)
     const total = pending.length
     let lastIngestResponse: IngestResponse | null = null
+    let priorIndexTotal = stats?.chunk_count ?? 0
     try {
       for (let i = 0; i < pending.length; i++) {
         const item = pending[i]
@@ -230,7 +251,19 @@ export function DocumentsView({
               return { ...x, status: 'indexed' as const, detail: msg }
             }),
           )
-          await reconcileAfterIngest(onRefreshStats, onRagStatsPatch, res)
+          if (!msg.startsWith('Omitido')) {
+            await reconcileAfterIngest(
+              onRefreshStats,
+              onRagStatsPatch,
+              res,
+              priorIndexTotal,
+            )
+            if (typeof res.chunk_count === 'number' && res.chunk_count > 0) {
+              priorIndexTotal = res.chunk_count
+            } else {
+              priorIndexTotal += res.chunks_added ?? 0
+            }
+          }
         } catch (err) {
           const isTimeout =
             err instanceof Error &&
@@ -300,7 +333,7 @@ export function DocumentsView({
         setIngestCurrentName(null)
       }, 3200)
     }
-  }, [onRefreshStats, onRagStatsPatch])
+  }, [onRefreshStats, onRagStatsPatch, stats?.chunk_count])
 
   useLayoutEffect(() => {
     if (!ingestLoading) return
