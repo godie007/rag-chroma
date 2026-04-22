@@ -2,7 +2,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 import numpy as np
@@ -20,13 +20,14 @@ from app.persistence import ChromaStore
 from app.preprocess import chunk_text_for_ingest
 from app.prompts import (
     RETRIEVAL_PROFILE_CLASSIFY_SYSTEM,
-    SYSTEM_NO_RETRIEVAL,
-    SYSTEM_RAG,
     build_no_retrieval_user_message,
     build_rag_user_message,
 )
+from app.prompt_store import get_system_no_retrieval_for_channel, get_system_rag_for_channel
 
 logger = logging.getLogger(__name__)
+
+GenerateChannel = Literal["web", "whatsapp"]
 
 @dataclass
 class SourceChunk:
@@ -376,12 +377,18 @@ class RAGService:
         """Mensaje de usuario con contexto + pregunta (plantilla en app.prompts)."""
         return build_rag_user_message(self._format_context_block(contexts), question)
 
-    def generate(self, question: str, contexts: list[SourceChunk]) -> tuple[str, list[SourceChunk]]:
-        """Genera respuesta del LLM (system prompts en app.prompts)."""
+    def generate(
+        self,
+        question: str,
+        contexts: list[SourceChunk],
+        *,
+        channel: GenerateChannel = "web",
+    ) -> tuple[str, list[SourceChunk]]:
+        """Genera respuesta del LLM; system prompt según canal (``prompt_store`` + defaults en ``prompts``)."""
         if not contexts:
             message = self.llm.invoke(
                 [
-                    {"role": "system", "content": SYSTEM_NO_RETRIEVAL},
+                    {"role": "system", "content": get_system_no_retrieval_for_channel(channel)},
                     {"role": "user", "content": build_no_retrieval_user_message(question)},
                 ]
             )
@@ -389,7 +396,7 @@ class RAGService:
 
         message = self.llm.invoke(
             [
-                {"role": "system", "content": SYSTEM_RAG},
+                {"role": "system", "content": get_system_rag_for_channel(channel)},
                 {"role": "user", "content": self._rag_user_message(question, contexts)},
             ]
         )

@@ -27,6 +27,7 @@ from app.whatsapp_allowlist_store import (
     remove_allowlist_number,
     set_allowlist_numbers,
 )
+from app.prompt_store import clear_prompt_overrides, get_effective_prompts, update_prompts
 from app.whatsapp_poll import (
     process_raw_whatsapp_inbound_dict,
     run_whatsapp_poll_loop,
@@ -207,6 +208,23 @@ class WhatsAppAllowlistAddBody(BaseModel):
     number: str = Field(..., min_length=1, max_length=40)
 
 
+class SystemPromptsOut(BaseModel):
+    system_rag_web: str
+    system_rag_whatsapp: str
+    system_no_retrieval_web: str
+    system_no_retrieval_whatsapp: str
+
+
+class SystemPromptsUpdate(BaseModel):
+    system_rag_web: str | None = None
+    system_rag_whatsapp: str | None = None
+    system_no_retrieval_web: str | None = None
+    system_no_retrieval_whatsapp: str | None = None
+
+
+_MAX_PROMPT_CHARS = 200_000
+
+
 class ConfigPublic(BaseModel):
     openai_chat_temperature: float
     openai_chat_max_output_tokens: int
@@ -253,6 +271,57 @@ def stats_indexed_sources():
     if _rag is None:
         return IndexedSourcesResponse(sources=[])
     return IndexedSourcesResponse(sources=_rag.list_indexed_sources())
+
+
+@app.get("/config/prompts", response_model=SystemPromptsOut)
+def get_system_prompts_config():
+    """System prompts efectivos (archivo + defaults de código; sin reiniciar servidor)."""
+    p = get_effective_prompts()
+    return SystemPromptsOut(
+        system_rag_web=p["system_rag_web"],
+        system_rag_whatsapp=p["system_rag_whatsapp"],
+        system_no_retrieval_web=p["system_no_retrieval_web"],
+        system_no_retrieval_whatsapp=p["system_no_retrieval_whatsapp"],
+    )
+
+
+@app.put("/config/prompts", response_model=SystemPromptsOut)
+def put_system_prompts_config(body: SystemPromptsUpdate):
+    """Guarda personalizaciones en ``backend/system_prompts.json``; vacío = vuelve al default de código."""
+    for name, val in body.model_dump().items():
+        if val is not None and len(val) > _MAX_PROMPT_CHARS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{name} supera {_MAX_PROMPT_CHARS} caracteres",
+            )
+    p = update_prompts(
+        system_rag_web=body.system_rag_web,
+        system_rag_whatsapp=body.system_rag_whatsapp,
+        system_no_retrieval_web=body.system_no_retrieval_web,
+        system_no_retrieval_whatsapp=body.system_no_retrieval_whatsapp,
+    )
+    return SystemPromptsOut(
+        system_rag_web=p["system_rag_web"],
+        system_rag_whatsapp=p["system_rag_whatsapp"],
+        system_no_retrieval_web=p["system_no_retrieval_web"],
+        system_no_retrieval_whatsapp=p["system_no_retrieval_whatsapp"],
+    )
+
+
+@app.delete("/config/prompts", response_model=SystemPromptsOut)
+def delete_system_prompts_overrides():
+    """Elimina ``system_prompts.json``; vuelve a los textos por defecto del código (sin reiniciar)."""
+    try:
+        clear_prompt_overrides()
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"No se pudo borrar overrides: {e}") from e
+    out = get_effective_prompts()
+    return SystemPromptsOut(
+        system_rag_web=out["system_rag_web"],
+        system_rag_whatsapp=out["system_rag_whatsapp"],
+        system_no_retrieval_web=out["system_no_retrieval_web"],
+        system_no_retrieval_whatsapp=out["system_no_retrieval_whatsapp"],
+    )
 
 
 @app.get("/config", response_model=ConfigPublic)
@@ -480,7 +549,7 @@ def chat(body: ChatRequest):
         return ChatResponse(answer=new_chat_acknowledgement(), sources=[])
     rag = require_rag()
     contexts = rag.retrieve(body.question)
-    answer, used = rag.generate(body.question, contexts)
+    answer, used = rag.generate(body.question, contexts, channel="web")
     answer_out = strip_pdf_glyph_tokens(answer)
     return ChatResponse(
         answer=answer_out,

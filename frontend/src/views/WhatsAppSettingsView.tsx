@@ -22,7 +22,8 @@ export function WhatsAppSettingsView({
           WhatsApp
         </h1>
         <p className="text-on-surface-variant text-sm md:text-base leading-relaxed">
-          Administración del canal WhatsApp: control de acceso por número y referencia rápida del enlace con el backend.
+          Administración del canal WhatsApp: control de acceso por número y referencia del enlace con el backend. Las
+          instrucciones del modelo están en la pestaña <span className="font-semibold text-on-surface">Configuraciones</span>.
         </p>
         <div className="mt-3">
           <IndexFragmentBadge stats={stats} className="text-on-surface-variant" />
@@ -90,32 +91,6 @@ export function WhatsAppSettingsView({
                 </dd>
               </div>
             </dl>
-          </section>
-
-          <section className="bg-slate-900 text-white p-6 md:p-8 rounded-2xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-56 h-56 bg-primary/15 blur-[80px] rounded-full -translate-y-1/2 translate-x-1/2 pointer-events-none" />
-            <div className="relative z-10">
-              <h4 className="font-headline text-lg font-bold mb-3 flex items-center gap-2">
-                <Icon name="lightbulb" className="text-amber-200" />
-                Buenas prácticas
-              </h4>
-              <ul className="text-slate-300 text-sm space-y-2.5 leading-relaxed list-none m-0 p-0">
-                <li className="flex gap-2">
-                  <span className="text-secondary font-bold">·</span>
-                  Los números autorizados son los del <strong className="text-white">remitente del chat</strong> (quien escribe al
-                  número conectado a GOWA), no el de la sesión del servidor.
-                </li>
-                <li className="flex gap-2">
-                  <span className="text-secondary font-bold">·</span>
-                  Los grupos siguen la configuración del backend; esta lista filtra por JID en conversaciones 1:1.
-                </li>
-                <li className="flex gap-2">
-                  <span className="text-secondary font-bold">·</span>
-                  Tras cambios masivos en producción, conviene revisar los logs del servicio RAG ante cualquier bloqueo
-                  inesperado.
-                </li>
-              </ul>
-            </div>
           </section>
         </div>
       </div>

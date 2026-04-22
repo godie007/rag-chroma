@@ -221,6 +221,35 @@ export type RagasEvaluateResponse = {
   }[]
 }
 
+export type SystemPromptsConfig = {
+  system_rag_web: string
+  system_rag_whatsapp: string
+  system_no_retrieval_web: string
+  system_no_retrieval_whatsapp: string
+}
+
+export async function fetchSystemPrompts(): Promise<SystemPromptsConfig> {
+  const res = await fetch(`${base}/config/prompts`, { cache: 'no-store' })
+  await handle(res)
+  return res.json()
+}
+
+export async function saveSystemPrompts(updates: Partial<SystemPromptsConfig>): Promise<SystemPromptsConfig> {
+  const res = await fetch(`${base}/config/prompts`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  })
+  await handle(res)
+  return res.json()
+}
+
+export async function resetSystemPromptsToCodeDefaults(): Promise<SystemPromptsConfig> {
+  const res = await fetch(`${base}/config/prompts`, { method: 'DELETE' })
+  await handle(res)
+  return res.json()
+}
+
 export async function runRagasEvaluation(evalRelativePath?: string | null): Promise<RagasEvaluateResponse> {
   const u = new URL(apiAbsoluteUrl('/evaluate'))
   if (evalRelativePath?.trim()) {

@@ -1,7 +1,7 @@
 import type { StatsResponse } from '../api'
 import { getApiBase } from '../api'
 
-export type AppView = 'documents' | 'chat' | 'evaluation' | 'whatsapp'
+export type AppView = 'documents' | 'chat' | 'evaluation' | 'whatsapp' | 'settings'
 
 type AppShellProps = {
   view: AppView
@@ -52,6 +52,7 @@ export function AppShell({ view, setView, stats, children }: AppShellProps) {
               <NavTab active={view === 'chat'} label="Chat" onClick={() => setView('chat')} />
               <NavTab active={view === 'evaluation'} label="Evaluación" onClick={() => setView('evaluation')} />
               <NavTab active={view === 'whatsapp'} label="WhatsApp" onClick={() => setView('whatsapp')} />
+              <NavTab active={view === 'settings'} label="Configuraciones" onClick={() => setView('settings')} />
             </nav>
           </div>
           <div className="flex flex-wrap items-center gap-3 text-xs text-on-surface-variant shrink-0">

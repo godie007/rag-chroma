@@ -491,7 +491,9 @@ async def process_normalized_whatsapp_message(
         return {"ok": True, "replied": True, "replied_to": phone, "reason": "new_chat_command"}
 
     contexts = await asyncio.to_thread(rag.retrieve, content)
-    answer, _used = await asyncio.to_thread(rag.generate, content, contexts)
+    answer, _used = await asyncio.to_thread(
+        rag.generate, content, contexts, channel="whatsapp"
+    )
     answer_out = strip_pdf_glyph_tokens(answer)
     logger.info("WhatsApp enviando respuesta [%s] | destino=%s | len=%s", source, phone, len(answer_out))
     await send_whatsapp_text(

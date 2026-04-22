@@ -10,6 +10,7 @@ import { AppShell, type AppView } from './layout/AppShell'
 import { ChatView } from './views/ChatView'
 import { DocumentsView } from './views/DocumentsView'
 import { EvaluationView } from './views/EvaluationView'
+import { ConfigurationsView } from './views/ConfigurationsView'
 import { WhatsAppSettingsView } from './views/WhatsAppSettingsView'
 
 function App() {
@@ -129,6 +130,16 @@ function App() {
           aria-hidden={view !== 'whatsapp'}
         >
           <WhatsAppSettingsView config={config} stats={stats} />
+        </div>
+        <div
+          className={
+            view === 'settings'
+              ? 'flex min-h-0 flex-1 flex-col overflow-y-auto'
+              : 'hidden'
+          }
+          aria-hidden={view !== 'settings'}
+        >
+          <ConfigurationsView stats={stats} />
         </div>
       </div>
     </AppShell>
