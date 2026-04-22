@@ -1,4 +1,28 @@
-const base = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:3333'
+/**
+ * Prefijo para `fetch`: cadena vacía = mismo origen que la página (producción detrás de Nginx).
+ * Solo `??` no basta: `.env` puede tener VITE_API_BASE_URL= (vacío explícito).
+ */
+function apiBasePrefix(): string {
+  const raw = import.meta.env.VITE_API_BASE_URL
+  if (raw === undefined || raw === null) return 'http://127.0.0.1:3333'
+  const s = String(raw).trim()
+  if (s === '') return ''
+  return s.replace(/\/$/, '')
+}
+
+const base = apiBasePrefix()
+
+/** URL absoluta para `new URL()` (evita "Invalid URL" cuando el prefijo es vacío). */
+function apiAbsoluteUrl(path: string): string {
+  const p = path.startsWith('/') ? path : `/${path}`
+  if (base === '') {
+    if (typeof window !== 'undefined' && window.location?.origin) {
+      return `${window.location.origin}${p}`
+    }
+    return `http://127.0.0.1:3333${p}`
+  }
+  return `${base}${p}`
+}
 
 export type ChatSource = { content: string; metadata: Record<string, unknown> }
 
@@ -97,7 +121,9 @@ export async function chat(question: string): Promise<ChatResponse> {
 }
 
 export function getApiBase(): string {
-  return base
+  return base === '' && typeof window !== 'undefined' && window.location?.origin
+    ? window.location.origin
+    : base || 'http://127.0.0.1:3333'
 }
 
 export type StatsResponse = {
@@ -170,7 +196,7 @@ export async function addWhatsAppAllowlistNumber(number: string): Promise<WhatsA
 }
 
 export async function removeWhatsAppAllowlistNumber(number: string): Promise<WhatsAppAllowlistResponse> {
-  const u = new URL(`${base}/whatsapp/allowlist`)
+  const u = new URL(apiAbsoluteUrl('/whatsapp/allowlist'))
   u.searchParams.set('number', number)
   const res = await fetch(u.toString(), { method: 'DELETE' })
   await handle(res)
@@ -196,7 +222,7 @@ export type RagasEvaluateResponse = {
 }
 
 export async function runRagasEvaluation(evalRelativePath?: string | null): Promise<RagasEvaluateResponse> {
-  const u = new URL(`${base}/evaluate`)
+  const u = new URL(apiAbsoluteUrl('/evaluate'))
   if (evalRelativePath?.trim()) {
     u.searchParams.set('eval_relative_path', evalRelativePath.trim())
   }
