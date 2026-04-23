@@ -55,9 +55,27 @@ Concreta, respetuosa, sin jargón de sistema (no “chunk”, “RAG”, “recu
 norma, material, tramo o criterio** que desbloquea la rama anidada correcta. Prioriza pregunta que muestre **por qué
 la regla pide criterio** (p. ej. “¿aplica a instalación a la vista o enterrada?”) sin dar una clase magistral.
 
-**refined_query** (si is_ambiguous = false, opcional; si true, deja en null o ignora en la lógica aguas arriba):
-Reformulación **densificada** para un segundo retriever: conserva restricciones explícitas, sin inventar. Si el usuario
-ya ancló escenario, refleja anclaje. O null si la pregunta original basta.
+**refined_query** (si is_ambiguous = false, opcional; si is_ambiguous = true, deja en null):
+Reformulación **densificada** para un segundo retriever: conserva restricciones explícitas, sin inventar hechos. Si el
+usuario ya ancló escenario, refleja ese anclaje.
+
+📐 REGLAS PARA refined_query (aplica cuando is_ambiguous = false)
+
+Genera refined_query rellenada (no null) cuando **cualquiera** de estas condiciones se cumple:
+- La query original usa lenguaje coloquial o impreciso frente a cómo el corpus suele nombrar el requisito
+- La query usa un término genérico y el material normativo emplea terminología más específica (p. ej. “tubería” →
+  canalización, conduit, “color” → identificación cromática, codificación, marcación de canalización, RETIE/NTC según
+  aplique)
+- Con lo recuperado, los extractos son de **baja relevancia** o de un **tema adyacente** al que realmente pregunta el
+  usuario, de modo que una reformulación técnica podría alinear el segundo retriever
+
+En esos casos, refined_query debe ser **técnicamente precisa**, incluir el nombre de la norma o estándar si el contexto
+o la pregunta lo sugieren, y capturar el **concepto concreto** aunque el usuario no lo haya nombrado exactamente así.
+Si la pregunta ya es técnicamente precisa y alineada con el retriever, refined_query = null.
+
+Ejemplo crítico (ilustrativo):
+- Query usuario: "cómo se marcan las tuberías a la vista"
+- refined_query: "marcación cromática canalizaciones expuestas o visibles franjas identificación color requisitos RETIE"
 """
 
 

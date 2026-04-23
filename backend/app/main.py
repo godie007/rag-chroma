@@ -254,6 +254,7 @@ class ConfigPublic(BaseModel):
     enable_contextual_retrieval: bool
     rag_clarification_enabled: bool
     rag_clarification_max_rounds: int
+    rag_clarify_semantic_expand: bool
     whatsapp_polling_active: bool
     whatsapp_webhook_active: bool
     whatsapp_poll_mode: str
@@ -363,6 +364,7 @@ def public_config():
         enable_contextual_retrieval=s.enable_contextual_retrieval,
         rag_clarification_enabled=s.rag_clarification_enabled,
         rag_clarification_max_rounds=s.rag_clarification_max_rounds,
+        rag_clarify_semantic_expand=s.rag_clarify_semantic_expand,
         whatsapp_polling_active=wa_poll,
         whatsapp_webhook_active=wa_ok,
         whatsapp_poll_mode=s.whatsapp_poll_mode,

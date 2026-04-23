@@ -178,6 +178,7 @@ export type ConfigPublic = {
   enable_contextual_retrieval: boolean
   rag_clarification_enabled: boolean
   rag_clarification_max_rounds: number
+  rag_clarify_semantic_expand: boolean
   whatsapp_polling_active: boolean
   whatsapp_webhook_active: boolean
   whatsapp_poll_mode: 'recent' | 'chats'

@@ -12,6 +12,7 @@ from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 
 from app.config import Settings
+from app.expand_query import expand_query
 from app.prompts import SYSTEM_CLARIFICATION_AMBIGUITY_EVAL
 from app.rag_service import RAGService, SourceChunk, GenerateChannel
 
@@ -30,6 +31,7 @@ class AmbiguityEvaluation(BaseModel):
 
 class _GraphState(TypedDict, total=False):
     query: str
+    expanded_query: str
     channel: str
     n_clarif_sent_before: int
     max_clarif: int
@@ -56,11 +58,15 @@ def _chunks_preview(chunks: list[SourceChunk], max_chars: int = 12_000) -> str:
     return "\n\n---\n\n".join(parts)
 
 
-def _node_retrieve(rag: RAGService) -> Any:
+def _node_retrieve(rag: RAGService, settings: Settings) -> Any:
     def _run(s: _GraphState) -> dict[str, Any]:
-        q = s.get("query") or ""
-        ch = rag.retrieve((q or " ").strip() or " ")
-        return {"chunks": ch}
+        q = (s.get("query") or "").strip() or " "
+        if settings.rag_clarify_semantic_expand:
+            expanded = expand_query(q, rag.llm)
+        else:
+            expanded = q
+        ch = rag.retrieve(expanded)
+        return {"chunks": ch, "expanded_query": expanded}
 
     return _run
 
@@ -137,6 +143,7 @@ def _node_re_refine(rag: RAGService) -> Any:
         ev = s.get("eval_result")
         rq = (ev.refined_query or "").strip() if ev else ""
         if not rq:
+            # El primer retrieve ya usó expanded_query; no hay reformulación adicional.
             return {"re_retrieve_done": True}
         ch2 = rag.retrieve(rq)
         if ch2:
@@ -171,7 +178,7 @@ def _route_after_eval(s: _GraphState) -> str:
 
 def build_clarify_graph(rag: RAGService, settings: Settings) -> Any:
     g = StateGraph(_GraphState)
-    g.add_node("retrieve", _node_retrieve(rag))
+    g.add_node("retrieve", _node_retrieve(rag, settings))
     g.add_node("evaluate", _node_evaluate(rag, settings))
     g.add_node("clarify", _node_clarify())
     g.add_node("re_refine", _node_re_refine(rag))
