@@ -20,7 +20,6 @@ arranque del worker para no contestar todo el historial de ``/messages/recent`` 
 from __future__ import annotations
 
 import asyncio
-import functools
 import hashlib
 import logging
 import re
@@ -494,15 +493,12 @@ async def process_normalized_whatsapp_message(
         )
         return {"ok": True, "replied": True, "replied_to": phone, "reason": "new_chat_command"}
 
-    answer, _used, _rtype = await asyncio.to_thread(
-        functools.partial(
-            run_user_turn,
-            rag,
-            settings,
-            question=content,
-            thread_id=chat_jid,
-            channel="whatsapp",
-        )
+    answer, _used, _rtype = await run_user_turn(
+        rag,
+        settings,
+        question=content,
+        thread_id=chat_jid,
+        channel="whatsapp",
     )
     answer_out = strip_pdf_glyph_tokens(answer)
     logger.info("WhatsApp enviando respuesta [%s] | destino=%s | len=%s", source, phone, len(answer_out))

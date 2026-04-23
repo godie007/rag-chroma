@@ -10,7 +10,7 @@ from typing import Any, Literal
 from app import clarify_store as cs
 from app.clarification_flow import build_clarify_graph, run_clarify_turn
 from app.config import Settings
-from app.expand_query import expand_query
+from app.expand_query import expand_query_async
 from app.rag_service import RAGService, SourceChunk, GenerateChannel
 
 logger = logging.getLogger("rag_qc.clarify")
@@ -33,7 +33,7 @@ def reset_clarify_graph() -> None:
     _compiled_graph = None
 
 
-def _classic_rag_answer(
+async def _classic_rag_answer(
     rag: RAGService,
     settings: Settings,
     question: str,
@@ -43,15 +43,21 @@ def _classic_rag_answer(
     Retriever: puede usar query expandida (sinónimos) si RAG_CLARIFY_SEMANTIC_EXPAND.
     Generación: siempre con la pregunta original del usuario.
     """
+    q_stripped = (question or "").strip()
+    if not q_stripped:
+        logger.warning("Pregunta vacía o solo espacios: se omite retrieve y expansión")
+        return rag.generate(question or "", [], channel=channel)
     if settings.rag_clarify_semantic_expand:
-        ret_q = expand_query((question or " ").strip() or " ", rag.llm)
+        ret_q = await expand_query_async(q_stripped, rag.llm)
+        if not ret_q.strip():
+            ret_q = q_stripped
     else:
-        ret_q = (question or " ").strip() or " "
+        ret_q = q_stripped
     chunks = rag.retrieve(ret_q)
     return rag.generate(question, chunks, channel=channel)
 
 
-def run_user_turn(
+async def run_user_turn(
     rag: RAGService,
     settings: Settings,
     *,
@@ -65,12 +71,12 @@ def run_user_turn(
     """
     g = get_clarify_graph(rag, settings)
     if g is None:
-        ans, used = _classic_rag_answer(rag, settings, question, channel)
+        ans, used = await _classic_rag_answer(rag, settings, question, channel)
         return ans, used, "answer"
     try:
         eff, _f = cs.build_effective_query(thread_id, question)
         n0 = cs.clarifications_sent_before(thread_id)
-        tr = run_clarify_turn(
+        tr = await run_clarify_turn(
             g,
             query=eff,
             channel=channel,
@@ -86,5 +92,5 @@ def run_user_turn(
         return tr.text, tr.sources, "answer"
     except Exception as e:
         logger.exception("Bucle de clarificación falló (%s); RAG clásico", e)
-        ans, used = _classic_rag_answer(rag, settings, question, channel)
+        ans, used = await _classic_rag_answer(rag, settings, question, channel)
         return ans, used, "answer"

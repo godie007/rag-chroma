@@ -576,7 +576,7 @@ async def whatsapp_webhook(request: Request):
 
 
 @app.post("/chat", response_model=ChatResponse)
-def chat(body: ChatRequest):
+async def chat(body: ChatRequest):
     from app import clarify_store as _cs
     from app.clarify_bridge import run_user_turn
 
@@ -591,7 +591,7 @@ def chat(body: ChatRequest):
             thread_id=thread_id,
             response_type="answer",
         )
-    text, used, rtype = run_user_turn(
+    text, used, rtype = await run_user_turn(
         rag,
         settings,
         question=body.question.strip(),

@@ -1,11 +1,11 @@
 """
-Expansión semántica de la consulta para el vector search en el bucle de clarificación.
+Expansión semántica de la consulta para el vector search (bucle de clarificación y RAG clásico).
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, cast
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
@@ -51,20 +51,45 @@ Ejemplos de expansión (ilustrativos; adapta a la consulta recibida):
 )
 
 
-def expand_query(query: str, chat: ChatOpenAI) -> str:
+def _build_expand_chain(chat: ChatOpenAI) -> Any:
+    struct_llm = chat.bind(temperature=0, max_tokens=500).with_structured_output(ExpandedQuery)
+    return _EXPAND_PROMPT | struct_llm
+
+
+def _postprocess_combined(result: ExpandedQuery, q: str) -> str:
+    out = (result.combined or "").strip()
+    return out if out else q
+
+
+async def expand_query_async(query: str, chat: ChatOpenAI) -> str:
     """
-    Devuelve la query consolidada con sinónimos para el vector search.
-    Si el LLM falla o la entrada es vacía, retorna la query original.
+    Devuelve la query consolidada con sinónimos para el vector search (no bloquea con HTTP sync).
+    No llames al LLM con entrada vacía: devuelve "" y deja el retrieve/generate al caller.
     """
     q = (query or "").strip()
     if not q:
-        return query or " "
+        return ""
     try:
-        struct_llm = chat.bind(temperature=0, max_tokens=500).with_structured_output(ExpandedQuery)
-        chain: Any = _EXPAND_PROMPT | struct_llm
-        result: ExpandedQuery = chain.invoke({"query": q})
-        out = (result.combined or "").strip()
-        return out if out else q
+        chain = _build_expand_chain(chat)
+        result: ExpandedQuery = cast(ExpandedQuery, await chain.ainvoke({"query": q}))
+        return _postprocess_combined(result, q)
+    except Exception as e:
+        logger.warning("Expansión semántica de consulta falló: %s; se usa la query original", e)
+        return q
+
+
+def expand_query(query: str, chat: ChatOpenAI) -> str:
+    """
+    Variante síncrona (``invoke``). Preferible ``expand_query_async`` bajo un event loop activo.
+    Con entrada vacía devuelve "" (sin LLM).
+    """
+    q = (query or "").strip()
+    if not q:
+        return ""
+    try:
+        chain = _build_expand_chain(chat)
+        result: ExpandedQuery = cast(ExpandedQuery, chain.invoke({"query": q}))
+        return _postprocess_combined(result, q)
     except Exception as e:
         logger.warning("Expansión semántica de consulta falló: %s; se usa la query original", e)
         return q

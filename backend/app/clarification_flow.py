@@ -12,7 +12,7 @@ from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 
 from app.config import Settings
-from app.expand_query import expand_query
+from app.expand_query import expand_query_async
 from app.prompts import SYSTEM_CLARIFICATION_AMBIGUITY_EVAL
 from app.rag_service import RAGService, SourceChunk, GenerateChannel
 
@@ -59,10 +59,17 @@ def _chunks_preview(chunks: list[SourceChunk], max_chars: int = 12_000) -> str:
 
 
 def _node_retrieve(rag: RAGService, settings: Settings) -> Any:
-    def _run(s: _GraphState) -> dict[str, Any]:
-        q = (s.get("query") or "").strip() or " "
+    async def _run(s: _GraphState) -> dict[str, Any]:
+        q = (s.get("query") or "").strip()
+        if not q:
+            logger.warning(
+                "Query vacía o solo espacios en nodo retrieve; se omite retrieve y expansión"
+            )
+            return {"chunks": [], "expanded_query": ""}
         if settings.rag_clarify_semantic_expand:
-            expanded = expand_query(q, rag.llm)
+            expanded = await expand_query_async(q, rag.llm)
+            if not (expanded or "").strip():
+                expanded = q
         else:
             expanded = q
         ch = rag.retrieve(expanded)
@@ -72,7 +79,7 @@ def _node_retrieve(rag: RAGService, settings: Settings) -> Any:
 
 
 def _node_evaluate(rag: RAGService, _settings: Settings) -> Any:
-    def _run(s: _GraphState) -> dict[str, Any]:
+    async def _run(s: _GraphState) -> dict[str, Any]:
         q = (s.get("query") or "").strip()
         max_r = int(s.get("max_clarif") or 0)
         n0 = int(s.get("n_clarif_sent_before") or 0)
@@ -124,7 +131,7 @@ Documentos (extractos recuperados, uso interno):
 
 
 def _node_clarify() -> Any:
-    def _run(s: _GraphState) -> dict[str, Any]:
+    async def _run(s: _GraphState) -> dict[str, Any]:
         ev = s.get("eval_result")
         t = (ev.clarification_question or "").strip() if ev else ""
         if not t:
@@ -137,7 +144,7 @@ def _node_clarify() -> Any:
 
 
 def _node_re_refine(rag: RAGService) -> Any:
-    def _run(s: _GraphState) -> dict[str, Any]:
+    async def _run(s: _GraphState) -> dict[str, Any]:
         if s.get("re_retrieve_done"):
             return {"re_retrieve_done": True}
         ev = s.get("eval_result")
@@ -154,7 +161,7 @@ def _node_re_refine(rag: RAGService) -> Any:
 
 
 def _node_answer(rag: RAGService) -> Any:
-    def _run(s: _GraphState) -> dict[str, Any]:
+    async def _run(s: _GraphState) -> dict[str, Any]:
         ch = s.get("chunks") or []
         q = (s.get("query") or "").strip()
         ch_t = s.get("channel") or "web"
@@ -201,7 +208,7 @@ class ClarifyTurnResult:
     n_clarifications_asked_after: int
 
 
-def run_clarify_turn(
+async def run_clarify_turn(
     graph: Any,
     *,
     query: str,
@@ -209,7 +216,7 @@ def run_clarify_turn(
     n_clarif_sent_before: int,
     max_clarif: int,
 ) -> ClarifyTurnResult:
-    out: _GraphState = graph.invoke(
+    out: _GraphState = await graph.ainvoke(
         {
             "query": query,
             "channel": channel,
