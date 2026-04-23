@@ -10,6 +10,7 @@ from typing import Any, Literal
 from app import clarify_store as cs
 from app.clarification_flow import build_clarify_graph, run_clarify_turn
 from app.config import Settings
+from app.expand_query import expand_query
 from app.rag_service import RAGService, SourceChunk, GenerateChannel
 
 logger = logging.getLogger("rag_qc.clarify")
@@ -32,6 +33,24 @@ def reset_clarify_graph() -> None:
     _compiled_graph = None
 
 
+def _classic_rag_answer(
+    rag: RAGService,
+    settings: Settings,
+    question: str,
+    channel: GenerateChannel,
+) -> tuple[str, list[SourceChunk]]:
+    """
+    Retriever: puede usar query expandida (sinónimos) si RAG_CLARIFY_SEMANTIC_EXPAND.
+    Generación: siempre con la pregunta original del usuario.
+    """
+    if settings.rag_clarify_semantic_expand:
+        ret_q = expand_query((question or " ").strip() or " ", rag.llm)
+    else:
+        ret_q = (question or " ").strip() or " "
+    chunks = rag.retrieve(ret_q)
+    return rag.generate(question, chunks, channel=channel)
+
+
 def run_user_turn(
     rag: RAGService,
     settings: Settings,
@@ -46,8 +65,7 @@ def run_user_turn(
     """
     g = get_clarify_graph(rag, settings)
     if g is None:
-        chunks = rag.retrieve(question)
-        ans, used = rag.generate(question, chunks, channel=channel)
+        ans, used = _classic_rag_answer(rag, settings, question, channel)
         return ans, used, "answer"
     try:
         eff, _f = cs.build_effective_query(thread_id, question)
@@ -68,6 +86,5 @@ def run_user_turn(
         return tr.text, tr.sources, "answer"
     except Exception as e:
         logger.exception("Bucle de clarificación falló (%s); RAG clásico", e)
-        chunks = rag.retrieve(question)
-        ans, used = rag.generate(question, chunks, channel=channel)
+        ans, used = _classic_rag_answer(rag, settings, question, channel)
         return ans, used, "answer"
