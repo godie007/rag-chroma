@@ -77,6 +77,8 @@ PyYAML==6.0.3
 ragas==0.4.3
 referencing==0.37.0
 regex==2026.3.32
+# RAG parent_rerank: cross-encoder (local). Arrastra torch vía sentence-transformers.
+sentence-transformers==3.3.1
 requests==2.33.1
 requests-oauthlib==2.0.0
 requests-toolbelt==1.0.0

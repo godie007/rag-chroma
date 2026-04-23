@@ -7,6 +7,7 @@ import logging
 import shutil
 import stat
 from pathlib import Path
+from typing import Any
 
 import chromadb
 from langchain_chroma import Chroma
@@ -63,9 +64,16 @@ def chmod_chroma_existing_files(path: Path) -> None:
 class ChromaStore:
     """Encapsula el vector store local: apertura, reintentos de escritura y borrado del índice."""
 
-    def __init__(self, settings: Settings, embeddings: OpenAIEmbeddings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        embeddings: OpenAIEmbeddings,
+        *,
+        collection_name: str | None = None,
+    ) -> None:
         self.settings = settings
         self.embeddings = embeddings
+        self._collection_name = collection_name
         self._vectorstore: Chroma | None = None
         self._open_client()
 
@@ -73,8 +81,9 @@ class ChromaStore:
         persist = Path(self.settings.chroma_persist_directory)
         ensure_chroma_storage_writable(persist)
         chmod_chroma_existing_files(persist)
+        cname = self._collection_name or self.settings.chroma_collection_name
         self._vectorstore = Chroma(
-            collection_name=self.settings.chroma_collection_name,
+            collection_name=cname,
             embedding_function=self.embeddings,
             persist_directory=self.settings.chroma_persist_directory,
             client_settings=chroma_client_settings(),
@@ -85,6 +94,16 @@ class ChromaStore:
         if self._vectorstore is None:
             raise RuntimeError("Chroma no inicializado")
         return self._vectorstore
+
+    def close(self) -> None:
+        """Cierra el cliente (p. ej. antes de borrar la carpeta de persistencia compartida con otra colección)."""
+        vs = self._vectorstore
+        self._vectorstore = None
+        if vs is not None:
+            try:
+                vs._client.close()  # noqa: SLF001
+            except Exception as e:
+                logger.warning("Chroma close: %s", e)
 
     def reconnect(self) -> None:
         """Cierra el cliente, refresca permisos y vuelve a abrir (p. ej. tras error sqlite readonly)."""
@@ -99,8 +118,9 @@ class ChromaStore:
             except Exception as e:
                 logger.warning("Chroma close en reconnect: %s", e)
         gc.collect()
+        cname = self._collection_name or self.settings.chroma_collection_name
         self._vectorstore = Chroma(
-            collection_name=self.settings.chroma_collection_name,
+            collection_name=cname,
             embedding_function=self.embeddings,
             persist_directory=self.settings.chroma_persist_directory,
             client_settings=chroma_client_settings(),
@@ -193,8 +213,15 @@ class ChromaStore:
                     continue
                 raise
 
-    def similarity_search_with_score(self, question: str, k: int):
-        return self.vectorstore.similarity_search_with_score(question, k=k)
+    def similarity_search_with_score(
+        self,
+        question: str,
+        k: int,
+        filter: dict[str, Any] | None = None,  # noqa: A002
+    ) -> list[tuple[Document, float]]:
+        return self.vectorstore.similarity_search_with_score(
+            question, k=k, filter=filter
+        )
 
     def wipe_persist_directory_and_reopen(self) -> None:
         """Vacía la base vía API de Chroma, cierra SQLite y borra la carpeta en disco antes de reabrir.
@@ -228,8 +255,9 @@ class ChromaStore:
             ) from e
         ensure_chroma_storage_writable(resolved)
         chmod_chroma_existing_files(resolved)
+        cname = self._collection_name or self.settings.chroma_collection_name
         self._vectorstore = Chroma(
-            collection_name=self.settings.chroma_collection_name,
+            collection_name=cname,
             embedding_function=self.embeddings,
             persist_directory=self.settings.chroma_persist_directory,
             client_settings=chroma_client_settings(),

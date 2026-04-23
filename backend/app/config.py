@@ -52,6 +52,20 @@ class Settings(BaseSettings):
     rag_clarification_max_rounds: int = Field(3, ge=0, le=8, description="Máx. preguntas de clarificación por hilo en una cadena")
     # Bucle de clarificación: LLM de expansión semántica antes del primer retrieve (sinónimos / términos normativos).
     rag_clarify_semantic_expand: bool = True
+    # RAG parent–child + rerank (cross-encoder local): niños pequeños en Chroma, padre en disco; requiere reindexar
+    # con este modo activo (colección distinta: chroma_collection_name + suffix). Si False, RAG clásico (MMR + umbral L2).
+    parent_rerank_enabled: bool = False
+    parent_rerank_chroma_suffix: str = "_pr_child"
+    parent_rerank_child_size: int = Field(200, ge=80, le=2_000)
+    parent_rerank_child_overlap: int = Field(20, ge=0, le=500)
+    parent_rerank_parent_size: int = Field(800, ge=200, le=8_000)
+    parent_rerank_parent_overlap: int = Field(50, ge=0, le=1_000)
+    # Candidatos vectoriales (hijos) antes del rerank; el LLM recibe top rag_reranker_top_n (texto padre).
+    rag_retriever_k: int = Field(20, ge=4, le=200)
+    rag_reranker_top_n: int = Field(6, ge=1, le=32)
+    rag_cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    # Metadato section_type a excluir (coma); vacío = sin filtro. Ej. portada, índice.
+    retrieval_exclude_section_types: str = "portada_indice,indice"
     # Incluye 4444 (Vite según README) y 5173/5174 (puertos por defecto/alternativo de Vite).
     cors_origins: str = (
         "http://localhost:4444,http://127.0.0.1:4444,"

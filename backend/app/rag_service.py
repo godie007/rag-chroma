@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import numpy as np
 from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 try:
     from langchain_chroma.vectorstores import maximal_marginal_relevance
@@ -17,7 +18,9 @@ except ImportError:
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from app.config import Settings
 from app.persistence import ChromaStore
+from app.persistence.parent_content_store import ParentContentStore
 from app.preprocess import build_ingest_recursive_splitter, chunk_text_for_ingest
+from app.sectioning import classify_section, parse_exclude_section_types
 from app.prompts import (
     RETRIEVAL_PROFILE_CLASSIFY_SYSTEM,
     build_contextual_chunk_user_message,
@@ -49,6 +52,8 @@ class RAGService:
     def reopen_chroma_client(self) -> None:
         """API pública por si hace falta forzar reapertura tras errores de disco (también usa ingesta internamente)."""
         self._chroma.reconnect()
+        if self._chroma_pr is not None:
+            self._chroma_pr.reconnect()
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -81,19 +86,44 @@ class RAGService:
                 **common_openai,
             )
         self._chroma = ChromaStore(settings, self.embeddings)
+        if settings.parent_rerank_enabled:
+            pr_name = f"{settings.chroma_collection_name}{settings.parent_rerank_chroma_suffix}"
+            self._chroma_pr = ChromaStore(
+                settings, self.embeddings, collection_name=pr_name
+            )
+            self._parent_text_store = ParentContentStore(
+                Path(settings.chroma_persist_directory) / "parent_rerank_parents.json"
+            )
+        else:
+            self._chroma_pr = None
+            self._parent_text_store = None
+        self._ce_model: Any = None
+        self._ce_load_failed: bool = False
+        self._parent_rerank_ingest_warned_ctx = False
         # Una sola escritura a Chroma a la vez (SQLite + embeddings), evita contienda y bloqueos raros.
         self._index_write_lock = threading.Lock()
 
     def collection_chunk_count(self) -> int:
+        if self.settings.parent_rerank_enabled and self._chroma_pr is not None:
+            return self._chroma_pr.collection_count()
         return self._chroma.collection_count()
 
     def list_indexed_sources(self) -> list[str]:
-        return self._chroma.list_distinct_sources()
+        a = set(self._chroma.list_distinct_sources())
+        if self._chroma_pr is not None:
+            a |= set(self._chroma_pr.list_distinct_sources())
+        return sorted(a)
 
     def delete_indexed_source(self, source_name: str) -> int:
         """Quita del índice todos los trozos asociados a una fuente (metadato ``source``)."""
         with self._index_write_lock:
-            return self._chroma.delete_by_source(source_name)
+            n0 = self._chroma.delete_by_source(source_name)
+            n1 = 0
+            if self._chroma_pr is not None:
+                n1 = self._chroma_pr.delete_by_source(source_name)
+            if self._parent_text_store is not None:
+                self._parent_text_store.delete_by_source(source_name)
+            return n0 + n1
 
     def clear_vector_index(self) -> None:
         """Borra la persistencia de Chroma en disco y recrea una colección vacía."""
@@ -103,7 +133,13 @@ class RAGService:
                 "CHROMA_PERSIST_DIRECTORY apunta a una ruta no permitida para borrado completo."
             )
         with self._index_write_lock:
+            if self._chroma_pr is not None:
+                self._chroma_pr.close()
             self._chroma.wipe_persist_directory_and_reopen()
+            if self._chroma_pr is not None:
+                self._chroma_pr.reconnect()
+            if self._parent_text_store is not None:
+                self._parent_text_store.clear()
 
     def ingest_text(self, text: str, source_name: str) -> int:
         """Parte el texto en fragmentos, genera embeddings y los guarda en Chroma.
@@ -115,6 +151,9 @@ class RAGService:
             return 0
 
         with self._index_write_lock:
+            if self.settings.parent_rerank_enabled and self._chroma_pr is not None:
+                return self._ingest_text_parent_rerank(text, source_name)
+
             # --- 2. Normalizar saltos de línea (mismo criterio que en preprocesado de archivos) ---
             text_norm = text.replace("\r\n", "\n").replace("\r", "\n")
 
@@ -168,6 +207,218 @@ class RAGService:
 
             return len(documents)
 
+    def _ingest_text_parent_rerank(self, text: str, source_name: str) -> int:
+        """Hijos (embed) pequeños + padre (texto completo) en disco; requiere parent_rerank_enabled."""
+        if self._chroma_pr is None or self._parent_text_store is None:
+            return 0
+        if self.settings.enable_contextual_retrieval and not self._parent_rerank_ingest_warned_ctx:
+            logger.info(
+                "PARENT_RERANK: ingesta sin contextual LLM (trozos hijos = texto; padre = disco)."
+            )
+            self._parent_rerank_ingest_warned_ctx = True
+        text_norm = text.replace("\r\n", "\n").replace("\r", "\n")
+        if not text_norm.strip():
+            return 0
+        s = self.settings
+        parent_spl = RecursiveCharacterTextSplitter(
+            chunk_size=s.parent_rerank_parent_size,
+            chunk_overlap=s.parent_rerank_parent_overlap,
+        )
+        child_spl = RecursiveCharacterTextSplitter(
+            chunk_size=s.parent_rerank_child_size,
+            chunk_overlap=s.parent_rerank_child_overlap,
+        )
+        parents = parent_spl.split_text(text_norm)
+        total = len(text_norm)
+        char_off = 0
+        store_batch: list[tuple[str, str, dict[str, Any]]] = []
+        documents: list[Document] = []
+        for idx, ptext in enumerate(parents):
+            if not ptext.strip():
+                char_off += len(ptext)
+                continue
+            sec = classify_section(
+                ptext, char_offset=char_off, total_len=max(total, 1)
+            )
+            char_off += len(ptext)
+            pid = str(uuid4())
+            store_batch.append(
+                (
+                    pid,
+                    ptext,
+                    {
+                        "source": source_name,
+                        "section_type": sec,
+                        "parent_index": str(idx),
+                    },
+                )
+            )
+            c_parts = child_spl.split_text(ptext) or [ptext]
+            for j, ctext in enumerate(c_parts):
+                if not ctext.strip():
+                    continue
+                meta: dict[str, Any] = {
+                    "source": source_name,
+                    "parent_id": pid,
+                    "section_type": sec,
+                    "pr_child": "1",
+                    "chunk_id": f"{source_name}#p{idx}#c{j}",
+                }
+                documents.append(Document(page_content=ctext.strip(), metadata=meta))
+        if not documents:
+            return 0
+        self._parent_text_store.set_parents_batch(store_batch)
+        self._chroma_pr.ensure_writable_before_ingest()
+        chroma_ids = [str(uuid4()) for _ in documents]
+        batch_size = max(1, s.chroma_ingest_batch_size)
+        for i in range(0, len(documents), batch_size):
+            self._chroma_pr.add_documents_batch(
+                documents[i : i + batch_size], chroma_ids[i : i + batch_size]
+            )
+        return len(documents)
+
+    def _get_cross_encoder(self) -> Any | None:
+        if self._ce_load_failed:
+            return None
+        if self._ce_model is not None:
+            return self._ce_model
+        if not self.settings.parent_rerank_enabled:
+            return None
+        try:
+            from langchain_community.cross_encoders import HuggingFaceCrossEncoder
+        except ImportError as e:
+            logger.warning("Cross-encoder no importable: %s; se ordena por distancia L2 de hijo", e)
+            self._ce_load_failed = True
+            return None
+        try:
+            self._ce_model = HuggingFaceCrossEncoder(
+                model_name=self.settings.rag_cross_encoder_model,
+                model_kwargs={"device": "cpu"},
+            )
+        except Exception as e:
+            logger.warning("No se pudo cargar el cross-encoder: %s; se usa solo el orden L2", e)
+            self._ce_load_failed = True
+            return None
+        return self._ce_model
+
+    def _chroma_metadata_where_exclude_sections(self) -> dict[str, Any] | None:
+        ex = parse_exclude_section_types(
+            self.settings.retrieval_exclude_section_types
+        )
+        if not ex:
+            return None
+        return {"section_type": {"$nin": ex}}
+
+    def _retrieve_parent_rerank(self, question: str, *, infer_broad_retrieval: bool) -> list[SourceChunk]:
+        if self._chroma_pr is None or self._parent_text_store is None:
+            return []
+        k = self.settings.top_k
+        use_broad = (
+            infer_broad_retrieval
+            and self.settings.llm_retrieval_profile
+            and self._infer_broad_retrieval(question)
+        )
+        if use_broad:
+            fetch_k = max(
+                self.settings.rag_retriever_k, k * 20, 120, self.settings.mmr_fetch_k
+            )
+            max_l2_distance = min(2.2, self.settings.retrieve_max_l2_distance * 2.0)
+        else:
+            fetch_k = max(
+                self.settings.rag_retriever_k, k * 10, 40, self.settings.mmr_fetch_k
+            )
+            max_l2_distance = self.settings.retrieve_max_l2_distance
+        embed_q = self._embedding_query_for_retrieval(question, use_broad=use_broad)
+        where = self._chroma_metadata_where_exclude_sections()
+        candidates = self._search_sorted_within_l2_cap(
+            embed_q,
+            fetch_k=fetch_k,
+            max_l2_distance=max_l2_distance,
+            store=self._chroma_pr,
+            where=where,
+        )
+        if not candidates and use_broad:
+            candidates = self._search_sorted_within_l2_cap(
+                embed_q,
+                fetch_k=fetch_k,
+                max_l2_distance=min(2.35, self.settings.retrieve_max_l2_distance * 2.75),
+                store=self._chroma_pr,
+                where=where,
+            )
+        if not candidates:
+            return []
+        if use_broad:
+            focused = self._prefix_before_relevance_cutoff(
+                candidates, margin_boost=0.35, skip_elbow=True
+            )
+        else:
+            scenario_boost = not use_broad and self._scenario_qualified_question(
+                question
+            )
+            focused = self._prefix_before_relevance_cutoff(
+                candidates, margin_boost=0.16 if scenario_boost else 0.0
+            )
+        if not focused:
+            return []
+        best_dist: dict[str, float] = {}
+        order_by_first: list[str] = []
+        for doc, dist in focused:
+            meta = doc.metadata or {}
+            pid = meta.get("parent_id")
+            if not isinstance(pid, str) or not pid:
+                continue
+            if pid not in best_dist:
+                order_by_first.append(pid)
+            prev = best_dist.get(pid, 1e9)
+            if float(dist) < prev:
+                best_dist[pid] = float(dist)
+        if not order_by_first:
+            return []
+        texts = self._parent_text_store.mget(order_by_first)
+        unique_ids = [p for p in order_by_first if p in texts]
+        if not unique_ids:
+            return []
+        enc = self._get_cross_encoder()
+        top_n = min(self.settings.rag_reranker_top_n, len(unique_ids))
+        if enc is not None:
+            try:
+                pairs: list[tuple[str, str]] = [
+                    (question, texts[pid]) for pid in unique_ids
+                ]
+                raw_scores = enc.score(pairs)
+                if hasattr(raw_scores, "tolist"):
+                    raw_scores = raw_scores.tolist()  # type: ignore[assignment]
+                if isinstance(raw_scores, (int, float)):
+                    sc = [float(raw_scores)]
+                else:
+                    sc = [float(x) for x in list(raw_scores)]
+                ranked = sorted(
+                    zip(unique_ids, sc, strict=True),
+                    key=lambda x: -x[1],
+                )[:top_n]
+                ordered = [p for p, _ in ranked]
+            except Exception as e:
+                logger.warning("Rerank parent falló (%s); orden por distancia de hijo", e)
+                ordered = sorted(unique_ids, key=lambda p: best_dist.get(p, 0.0))[
+                    :top_n
+                ]
+        else:
+            ordered = sorted(
+                unique_ids, key=lambda p: best_dist.get(p, 0.0)
+            )[:top_n]
+        out: list[SourceChunk] = []
+        for pid in ordered:
+            t = texts.get(pid)
+            if t is None or self._parent_text_store is None:
+                continue
+            meta: dict[str, Any] = {
+                "parent_id": pid,
+                "retrieval": "parent_rerank",
+            }
+            meta.update(self._parent_text_store.get_metadata(pid))
+            out.append(SourceChunk(content=t, metadata=meta))
+        return out
+
     def _contextualize_for_ingest(self, full_document: str, chunks: list[str]) -> list[str]:
         """Antepone contexto (LLM) a cada trozo para embedding; concurrencia acotada."""
         if not self._contextual_llm or not (full_document or "").strip() or not chunks:
@@ -215,9 +466,12 @@ class RAGService:
         *,
         fetch_k: int,
         max_l2_distance: float,
+        store: ChromaStore | None = None,
+        where: dict[str, Any] | None = None,
     ) -> list[tuple[Document, float]]:
         """Vecinos por similitud; descarta los que superan el umbral L2; ordena de mejor a peor distancia."""
-        scored = self._chroma.similarity_search_with_score(question, k=fetch_k)
+        s = store or self._chroma
+        scored = s.similarity_search_with_score(question, k=fetch_k, filter=where)
         within_cap = [
             (doc, float(dist)) for doc, dist in scored if float(dist) <= max_l2_distance
         ]
@@ -374,6 +628,10 @@ class RAGService:
         Si ``infer_broad_retrieval`` y ``llm_retrieval_profile`` están activos, una llamada
         ligera al LLM decide si ampliar ventana L2 y fragmentos para preguntas de cobertura.
         """
+        if self.settings.parent_rerank_enabled:
+            return self._retrieve_parent_rerank(
+                question, infer_broad_retrieval=infer_broad_retrieval
+            )
         k = self.settings.top_k
         use_broad = (
             infer_broad_retrieval

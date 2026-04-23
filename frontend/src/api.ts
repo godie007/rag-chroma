@@ -179,6 +179,9 @@ export type ConfigPublic = {
   rag_clarification_enabled: boolean
   rag_clarification_max_rounds: number
   rag_clarify_semantic_expand: boolean
+  parent_rerank_enabled: boolean
+  rag_retriever_k: number
+  rag_reranker_top_n: number
   whatsapp_polling_active: boolean
   whatsapp_webhook_active: boolean
   whatsapp_poll_mode: 'recent' | 'chats'
