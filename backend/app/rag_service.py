@@ -34,6 +34,11 @@ from app.prompt_store import get_system_no_retrieval_for_channel, get_system_rag
 logger = logging.getLogger(__name__)
 
 GenerateChannel = Literal["web", "whatsapp"]
+_MARKDOWN_OUTPUT_GUARDRAIL = (
+    "FORMATO OBLIGATORIO DE SALIDA: responde siempre en Markdown válido. "
+    "Usa párrafos, listas, tablas o encabezados cuando aporten claridad. "
+    "No respondas en JSON, XML ni texto estructurado de máquina."
+)
 
 @dataclass
 class SourceChunk:
@@ -51,6 +56,14 @@ class SourceChunk:
 
 
 class RAGService:
+    @staticmethod
+    def _force_markdown_system(system_prompt: str) -> str:
+        """Añade una guardrail de formato para que la salida final sea Markdown."""
+        base = (system_prompt or "").strip()
+        if not base:
+            return _MARKDOWN_OUTPUT_GUARDRAIL
+        return f"{base}\n\n{_MARKDOWN_OUTPUT_GUARDRAIL}"
+
     @staticmethod
     def _looks_like_ambiguity_payload(text: str) -> bool:
         """Detecta si el modelo devolvió JSON del evaluador de ambigüedad en vez de respuesta al usuario."""
@@ -736,7 +749,12 @@ class RAGService:
             user_message = build_no_retrieval_user_message(question)
             message = self.llm.invoke(
                 [
-                    {"role": "system", "content": get_system_no_retrieval_for_channel(channel)},
+                    {
+                        "role": "system",
+                        "content": self._force_markdown_system(
+                            get_system_no_retrieval_for_channel(channel)
+                        ),
+                    },
                     {"role": "user", "content": user_message},
                 ]
             )
@@ -748,7 +766,10 @@ class RAGService:
                 )
                 message = self.llm.invoke(
                     [
-                        {"role": "system", "content": SYSTEM_NO_RETRIEVAL},
+                        {
+                            "role": "system",
+                            "content": self._force_markdown_system(SYSTEM_NO_RETRIEVAL),
+                        },
                         {"role": "user", "content": user_message},
                     ]
                 )
@@ -758,7 +779,10 @@ class RAGService:
         user_message = self._rag_user_message(question, contexts)
         message = self.llm.invoke(
             [
-                {"role": "system", "content": get_system_rag_for_channel(channel)},
+                {
+                    "role": "system",
+                    "content": self._force_markdown_system(get_system_rag_for_channel(channel)),
+                },
                 {"role": "user", "content": user_message},
             ]
         )
@@ -770,7 +794,10 @@ class RAGService:
             )
             message = self.llm.invoke(
                 [
-                    {"role": "system", "content": SYSTEM_RAG},
+                    {
+                        "role": "system",
+                        "content": self._force_markdown_system(SYSTEM_RAG),
+                    },
                     {"role": "user", "content": user_message},
                 ]
             )
