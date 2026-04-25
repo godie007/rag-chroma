@@ -234,6 +234,21 @@ class SystemPromptsUpdate(BaseModel):
 _MAX_PROMPT_CHARS = 200_000
 
 
+def _looks_like_evaluator_prompt(text: str) -> bool:
+    s = (text or "").lower()
+    if not s.strip():
+        return False
+    # Firma de prompt de evaluación estructurada (no apto como prompt de respuesta final).
+    markers = (
+        "is_ambiguous",
+        "clarification_question",
+        "refined_query",
+        "evaluador de ambig",
+    )
+    hits = sum(1 for m in markers if m in s)
+    return hits >= 2
+
+
 class ConfigPublic(BaseModel):
     openai_chat_temperature: float
     openai_chat_max_output_tokens: int
@@ -311,6 +326,24 @@ def put_system_prompts_config(body: SystemPromptsUpdate):
             raise HTTPException(
                 status_code=400,
                 detail=f"{name} supera {_MAX_PROMPT_CHARS} caracteres",
+            )
+        if val and name.startswith("system_rag_") and _looks_like_evaluator_prompt(val):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"{name} parece un prompt del evaluador de ambigüedad "
+                    "(campos como is_ambiguous/refined_query). "
+                    "Usa ese texto solo en SYSTEM_CLARIFICATION_AMBIGUITY_EVAL (código), "
+                    "no en /config/prompts."
+                ),
+            )
+        if val and name.startswith("system_no_retrieval_") and _looks_like_evaluator_prompt(val):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"{name} parece un prompt del evaluador de ambigüedad. "
+                    "Este endpoint es para prompts de respuesta final al usuario."
+                ),
             )
     p = update_prompts(
         system_rag_web=body.system_rag_web,

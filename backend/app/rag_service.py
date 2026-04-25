@@ -23,6 +23,8 @@ from app.preprocess import build_ingest_recursive_splitter, chunk_text_for_inges
 from app.sectioning import classify_section, parse_exclude_section_types
 from app.prompts import (
     RETRIEVAL_PROFILE_CLASSIFY_SYSTEM,
+    SYSTEM_NO_RETRIEVAL,
+    SYSTEM_RAG,
     build_contextual_chunk_user_message,
     build_no_retrieval_user_message,
     build_rag_user_message,
@@ -49,6 +51,24 @@ class SourceChunk:
 
 
 class RAGService:
+    @staticmethod
+    def _looks_like_ambiguity_payload(text: str) -> bool:
+        """Detecta si el modelo devolvió JSON del evaluador de ambigüedad en vez de respuesta al usuario."""
+        raw = (text or "").strip()
+        if not raw.startswith("{"):
+            return False
+        try:
+            data = json.loads(raw)
+        except Exception:
+            return False
+        if not isinstance(data, dict):
+            return False
+        keys = set(data.keys())
+        # Firma típica de SYSTEM_CLARIFICATION_AMBIGUITY_EVAL
+        return "is_ambiguous" in keys and (
+            "clarification_question" in keys or "refined_query" in keys or "reason" in keys
+        )
+
     def reopen_chroma_client(self) -> None:
         """API pública por si hace falta forzar reapertura tras errores de disco (también usa ingesta internamente)."""
         self._chroma.reconnect()
@@ -713,18 +733,46 @@ class RAGService:
     ) -> tuple[str, list[SourceChunk]]:
         """Genera respuesta del LLM; system prompt según canal (``prompt_store`` + defaults en ``prompts``)."""
         if not contexts:
+            user_message = build_no_retrieval_user_message(question)
             message = self.llm.invoke(
                 [
                     {"role": "system", "content": get_system_no_retrieval_for_channel(channel)},
-                    {"role": "user", "content": build_no_retrieval_user_message(question)},
+                    {"role": "user", "content": user_message},
                 ]
             )
-            return self._llm_message_text(message), []
+            text = self._llm_message_text(message)
+            if self._looks_like_ambiguity_payload(text):
+                logger.warning(
+                    "Salida con firma de evaluador en generate(no_context) canal=%s; reintentando con SYSTEM_NO_RETRIEVAL default.",
+                    channel,
+                )
+                message = self.llm.invoke(
+                    [
+                        {"role": "system", "content": SYSTEM_NO_RETRIEVAL},
+                        {"role": "user", "content": user_message},
+                    ]
+                )
+                text = self._llm_message_text(message)
+            return text, []
 
+        user_message = self._rag_user_message(question, contexts)
         message = self.llm.invoke(
             [
                 {"role": "system", "content": get_system_rag_for_channel(channel)},
-                {"role": "user", "content": self._rag_user_message(question, contexts)},
+                {"role": "user", "content": user_message},
             ]
         )
-        return self._llm_message_text(message), contexts
+        text = self._llm_message_text(message)
+        if self._looks_like_ambiguity_payload(text):
+            logger.warning(
+                "Salida con firma de evaluador en generate(with_context) canal=%s; reintentando con SYSTEM_RAG default.",
+                channel,
+            )
+            message = self.llm.invoke(
+                [
+                    {"role": "system", "content": SYSTEM_RAG},
+                    {"role": "user", "content": user_message},
+                ]
+            )
+            text = self._llm_message_text(message)
+        return text, contexts
