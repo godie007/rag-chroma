@@ -166,7 +166,7 @@ sequenceDiagram
     API-->>UI: chunks_added, messages
 ```
 
-Tras cambiar `CHUNK_SIZE` / `CHUNK_OVERLAP` conviene `POST /ingest/reset` y volver a subir archivos.
+Tras cambiar `CHUNK_SIZE` / `CHUNK_OVERLAP` conviene `POST /ingest/reset` y volver a subir archivos. Lo mismo aplica al cambiar **`OPENAI_EMBEDDING_MODEL`** u **`OPENAI_EMBEDDING_DIMENSIONS`**: la colección Chroma fija la dimensión de embedding en la primera ingesta; si el modelo actual genera otra longitud (p. ej. índice antiguo a 1536 y `text-embedding-3-large` nativo a 3072), **no** se pueden añadir nuevos vectores hasta vaciar el índice. El backend documenta el fallo en [VARIABLES_ENTORNO.md](./VARIABLES_ENTORNO.md).
 
 ---
 
@@ -259,7 +259,7 @@ Definidas en `backend/app/config.py` (Pydantic Settings). Los nombres en **MAYÚ
 | `OPENAI_CHAT_MODEL` | `openai_chat_model` | `gpt-4o-mini` | Modelo de chat para respuestas y ramas sin contexto. |
 | `OPENAI_CHAT_TEMPERATURE` | `openai_chat_temperature` | `0.1` | Temperatura del chat RAG (`/chat`); validado entre 0 y 2. |
 | `OPENAI_EMBEDDING_MODEL` | `openai_embedding_model` | `text-embedding-3-large` | Modelo de embeddings para índice y consultas. |
-| `OPENAI_EMBEDDING_DIMENSIONS` | `openai_embedding_dimensions` | *vacío* | Dimensiones MRL (p. ej. 1024) con `text-embedding-3-large`; vacío = nativas. Cambiar implica reindexar. |
+| `OPENAI_EMBEDDING_DIMENSIONS` | `openai_embedding_dimensions` | *vacío* | MRL: vacío = nativo (**1536** con `text-embedding-3-small`, **3072** con `text-embedding-3-large`). Cambiar modelo o dimensión respecto al índice en disco requiere `POST /ingest/reset` y reingesta. |
 | `OPENAI_API_BASE` | `openai_api_base` | `None` | Base URL opcional (Azure OpenAI u otro compatible). |
 | `CHROMA_PERSIST_DIRECTORY` | `chroma_persist_directory` | `./chroma_db` | Carpeta de persistencia Chroma. Las rutas **relativas** se resuelven respecto a **`backend/`**, no al CWD de uvicorn. |
 | `CHROMA_COLLECTION_NAME` | `chroma_collection_name` | `internal_knowledge` | Nombre de la colección vectorial. |

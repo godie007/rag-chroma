@@ -139,6 +139,13 @@ class ChromaStore:
                 return
             except Exception as e:
                 msg = str(e).lower()
+                if "expecting embedding with dimension" in msg:
+                    raise RuntimeError(
+                        "La colección en Chroma fue creada con otra dimensión de vector que el modelo de "
+                        "embeddings actual. Tras cambiar OPENAI_EMBEDDING_MODEL o OPENAI_EMBEDDING_DIMENSIONS, "
+                        "llama a POST /ingest/reset y vuelve a indexar. "
+                        f"Detalle: {e}"
+                    ) from e
                 if attempt < 2 and (
                     "readonly" in msg or "1032" in msg or "read-only" in msg or "read only" in msg
                 ):
