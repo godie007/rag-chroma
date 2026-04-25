@@ -2,6 +2,8 @@
 
 Documento de referencia para la prueba técnica: componentes, flujos, persistencia, **prompts del LLM** y **variables de entorno** alineadas con `backend/app/config.py` y los `.env.example`.
 
+Detalle del **flujo de chat** (endpoints, cuatro system prompts configurables, bucle de clarificación, comando `/nuevo`, RAGAS): [ARQUITECTURA_CHATBOT.md](./ARQUITECTURA_CHATBOT.md).
+
 ---
 
 ## 1. Objetivo

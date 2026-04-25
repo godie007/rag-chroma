@@ -187,6 +187,7 @@ Typical edge setup: **GOWA** (Docker) on port **3000** and **Flask API** on **80
 
 ## Key Considerations
 
+- **Chat architecture:** User questions flow through `POST /chat` → optional LangGraph clarification loop or classic RAG → `RAGService.generate` with per-channel system prompts from `prompt_store` (defaults in `prompts.py`). See **`docs/ARQUITECTURA_CHATBOT.md`** for threads, `response_type`, `/config/prompts`, and non-configurable prompts (ambiguity eval, query expansion, retrieval profile).
 - **Environment variables are mandatory:** Backend will not initialize without `OPENAI_API_KEY`. Frontend: if `VITE_API_BASE_URL` is **not set** in the env file, the bundle defaults to `http://127.0.0.1:3333`. If it is set to an **empty string**, requests use the **current page origin** (typical for production behind a reverse proxy).
 - **Ingest response vs /stats:** Prefer **`chunk_count` on the `POST /ingest` response** to update the UI total; `GET /stats` may momentarily return a lower value (multiple workers, timing).
 - **Chroma persistence:** Vector DB is persisted on disk in the directory specified by `CHROMA_PERSIST_DIRECTORY` (defaults to `backend/chroma_db`). Clearing requires calling `POST /ingest/reset`.

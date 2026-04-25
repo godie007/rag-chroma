@@ -79,6 +79,7 @@ async def run_user_turn(
         tr = await run_clarify_turn(
             g,
             query=eff,
+            thread_id=thread_id,
             channel=channel,
             n_clarif_sent_before=n0,
             max_clarif=settings.rag_clarification_max_rounds,
@@ -88,7 +89,7 @@ async def run_user_turn(
                 thread_id, tr.effective_query, tr.n_clarifications_asked_after
             )
             return tr.text, tr.sources, "clarification"
-        cs.clear_thread(thread_id)
+        cs.mark_answered(thread_id, question, tr.text)
         return tr.text, tr.sources, "answer"
     except Exception as e:
         logger.exception("Bucle de clarificación falló (%s); RAG clásico", e)

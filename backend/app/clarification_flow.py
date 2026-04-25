@@ -11,6 +11,7 @@ from typing import Any, Literal, TypedDict
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 
+from app import clarify_store as cs
 from app.config import Settings
 from app.expand_query import expand_query_async
 from app.prompts import SYSTEM_CLARIFICATION_AMBIGUITY_EVAL
@@ -31,6 +32,7 @@ class AmbiguityEvaluation(BaseModel):
 
 class _GraphState(TypedDict, total=False):
     query: str
+    thread_id: str
     expanded_query: str
     channel: str
     n_clarif_sent_before: int
@@ -98,13 +100,16 @@ def _node_evaluate(rag: RAGService, _settings: Settings) -> Any:
             struct = rag.llm.bind(temperature=0, max_tokens=800).with_structured_output(
                 AmbiguityEvaluation
             )
-            human = f"""Pregunta / consulta (análisis interno):
+            tid = (s.get("thread_id") or "").strip()
+            hist = cs.thread_history_for_evaluator(tid) if tid else ""
+            body_q = f"""Pregunta / consulta (análisis interno):
 
 {q}
 
 Documentos (extractos recuperados, uso interno):
 {_chunks_preview(ch)}
 """
+            human = f"{hist}{body_q}" if hist else body_q
             out: AmbiguityEvaluation = struct.invoke(  # type: ignore[assignment]
                 [
                     {"role": "system", "content": SYSTEM_CLARIFICATION_AMBIGUITY_EVAL},
@@ -212,6 +217,7 @@ async def run_clarify_turn(
     graph: Any,
     *,
     query: str,
+    thread_id: str,
     channel: GenerateChannel,
     n_clarif_sent_before: int,
     max_clarif: int,
@@ -219,6 +225,7 @@ async def run_clarify_turn(
     out: _GraphState = await graph.ainvoke(
         {
             "query": query,
+            "thread_id": thread_id,
             "channel": channel,
             "n_clarif_sent_before": n_clarif_sent_before,
             "max_clarif": max_clarif,

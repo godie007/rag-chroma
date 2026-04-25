@@ -110,3 +110,4 @@ Solo las variables con prefijo **`VITE_`** llegan al código del navegador.
 - Instrucciones del LLM: defaults en `backend/app/prompts.py`; sobreescritura persistente (UI **Configuraciones** o `GET`/`PUT` `/config/prompts`) vía almacenamiento de fichero en el backend (`prompt_store`).
 - Plantilla copiable: `backend/.env.example`, `frontend/.env.example`
 - Arquitectura y diagramas: [ARQUITECTURA.md](./ARQUITECTURA.md)
+- Arquitectura del chat (preguntas, prompts por canal, clarificación, hilos): [ARQUITECTURA_CHATBOT.md](./ARQUITECTURA_CHATBOT.md)

@@ -26,6 +26,53 @@ la regla equivocada o mezclas ramas, el usuario toma decisiones con riesgo.
 5) **Hiponimia / términos técnicos** — palabras con varios sentidos en el dominio (línea, tramo, empalme, sección, tipo)
    cuyo sentido ancla la obligación. Si el corpus admite 2+ lecturas razonables, pide concreción.
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🧠 LECTURA DE HISTORIAL (CRÍTICO)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+El mensaje de usuario que analizas puede ir **precedido** por un bloque titulado
+**«Historial reciente del hilo (turnos previos resueltos)»** con pares resumidos
+pregunta/respuesta ya cerrados. Ese bloque no es la consulta actual: la consulta
+actual va en la sección **«Pregunta / consulta (análisis interno)»** más abajo.
+
+Reglas de uso del historial:
+
+1) **Variables ya fijadas** — Si en un turno previo se acordó o respondió con
+criterio sobre tensión, tipo de instalación, ubicación, calibre, norma, DDR,
+etc., esos calificadores son **datos del hilo** mientras el usuario no cambie
+de escenario. **No** los repreguntes en `clarification_question` si el texto
+del historial ya los cerró, salvo que la **consulta actual** pida explícitamente
+reabrir otra rama.
+
+2) **Continuidad temática** — Preguntas cortas o coloquiales del tipo
+«¿y la potencia?», «¿y si es trifásico?», «qué pasa con el calibre» se entienden
+como **seguimiento** del último tema resuelto: heredan escenario, tensión y
+decisiones ya expuestas en el historial. No las trates como consultas aisladas
+en el vacío.
+
+3) **Cambio de tema** — Si la consulta actual introduce un **escenario
+claramente distinto** (p. ej. se habló de duchas y ahora el usuario pide
+tableros generales de una planta distinta), el historial **antiguo** no obliga
+a asumir continuidad: re-evalúa variables como consulta nueva.
+
+4) **Sub-preguntas puntuales** — Si el usuario pide profundizar en un punto ya
+cubierto en el turno previo (p. ej. «¿por qué AWG 10 y no 12?») sin abrir
+nuevas ramas incompatibles, **no** es ambigüedad que exija otra vuelta:
+`is_ambiguous = false` y deja que el respondedor argumente con los extractos.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⛔ ANTI-PATRÓN: REPREGUNTAR LO RESUELTO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Antes de marcar `is_ambiguous = true`, pregúntate:
+
+- ¿La variable que querrías clarificar **ya quedó acotada o respondida** en el
+  historial reciente? → Sí: **no** repreguntes; `is_ambiguous = false`.
+- ¿Se deduce del **último intercambio** sin abrir reglas incompatibles? → Sí:
+  hereda criterio y `is_ambiguous = false`.
+- ¿El usuario **cambió explícitamente** de escenario? → Sí: evalúa la consulta
+  nueva sin forzar la continuidad del historial si no aplica.
+
 **Entrada** — PREGUNTA o consulta (a veces enriquecida con un matiz del usuario) + EXTRACTOS RECUPERADOS.
 
 **Salida estructurada:** is_ambiguous, reason, clarification_question, refined_query.

@@ -3,6 +3,7 @@
 Stack: **FastAPI** (Python), **React + Vite + TypeScript**, **Chroma** (vectores locales), **OpenAI** (embeddings + chat). Las claves y parámetros van en **variables de entorno** (nunca en el frontend).
 
 - **Arquitectura** (Mermaid, flujos, API): [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md)
+- **Chatbot** (preguntas, system prompts, clarificación, hilos): [docs/ARQUITECTURA_CHATBOT.md](docs/ARQUITECTURA_CHATBOT.md)
 - **Variables `.env`** (definición y razón de los valores por defecto): [docs/VARIABLES_ENTORNO.md](docs/VARIABLES_ENTORNO.md)
 
 ## Interfaz de la aplicación
