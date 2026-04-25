@@ -108,6 +108,7 @@ Activado con `RAG_CLARIFICATION_ENABLED=true` en el entorno. Parámetros relacio
 
 - Tras enviar una **clarification**, se guarda la consulta efectiva y el contador de rondas (`set_after_clarification`); se **preserva** el `turn_history` de turnos ya cerrados.
 - Tras un **`response_type: answer`**, ya no se borra el hilo: se llama a **`mark_answered`**, que añade un par (pregunta del usuario + resumen de la respuesta, truncado) a `turn_history` y reinicia la ronda de clarificación. Así el nodo **`evaluate`** recibe, vía `thread_history_for_evaluator`, un bloque de historial en el mensaje al evaluador (no confundir con la respuesta final al usuario).
+- La **pregunta de clarificación** (`response_type: clarification`) sale del nodo `clarify` del grafo, no de `RAGService.generate`. La instrucción de **salida en Markdown** se aplica solo en `generate(..., markdown_final=True)` cuando ya hay respuesta final (RAG clásico, nodo `answer` del grafo o evaluación RAGAS).
 - Mientras el hilo **espera matiz** (`awaiting_clarification`), `build_effective_query` **concatena** la consulta acumulada con el nuevo texto.
 - Tras una respuesta final, si el usuario envía un **seguimiento**, `build_effective_query` antepone un prefijo de contexto (última pregunta + resumen) para el **retrieve** del turno siguiente.
 

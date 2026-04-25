@@ -175,7 +175,7 @@ def _node_answer(rag: RAGService) -> Any:
         if ch_t not in ("web", "whatsapp"):
             ch_t = "web"
         channel: GenerateChannel = "whatsapp" if ch_t == "whatsapp" else "web"
-        text, used = rag.generate(q, ch, channel=channel)
+        text, used = rag.generate(q, ch, channel=channel, markdown_final=True)
         # Salvaguarda: el evaluador devuelve JSON interno; nunca debe mostrarse al usuario final.
         # Si por error de prompts/ruteo sale un objeto de ambigüedad serializado, regenera respuesta normal.
         try:
@@ -184,7 +184,7 @@ def _node_answer(rag: RAGService) -> Any:
                 logger.warning(
                     "Salida JSON del evaluador detectada en nodo answer; regenerando respuesta final."
                 )
-                text, used = rag.generate(q, ch, channel=channel)
+                text, used = rag.generate(q, ch, channel=channel, markdown_final=True)
         except Exception:
             pass
         return {

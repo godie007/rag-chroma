@@ -64,7 +64,7 @@ async def run_ragas_evaluation_async(
         gt = row["ground_truth"]
         logger.info("Evaluación RAGAS, pregunta: %s", q[:72] + ("…" if len(q) > 72 else ""))
         chunks = rag.retrieve(q, infer_broad_retrieval=False)
-        answer, _used = rag.generate(q, chunks)
+        answer, _used = rag.generate(q, chunks, markdown_final=True)
         questions.append(q)
         ground_truths.append(gt)
         answers.append(answer)

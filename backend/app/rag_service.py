@@ -743,18 +743,26 @@ class RAGService:
         contexts: list[SourceChunk],
         *,
         channel: GenerateChannel = "web",
+        markdown_final: bool = False,
     ) -> tuple[str, list[SourceChunk]]:
-        """Genera respuesta del LLM; system prompt según canal (``prompt_store`` + defaults en ``prompts``)."""
+        """Genera respuesta del LLM; system prompt según canal (``prompt_store`` + defaults en ``prompts``).
+
+        ``markdown_final`` solo debe ser True en la **respuesta final** al usuario (tras clarificar o RAG clásico).
+        Pasos internos o la pregunta de clarificación no usan este método con ``markdown_final=True``.
+        """
+        def _system_rag_effective() -> str:
+            s = get_system_rag_for_channel(channel)
+            return self._force_markdown_system(s) if markdown_final else s
+
+        def _system_no_retrieval_effective() -> str:
+            s = get_system_no_retrieval_for_channel(channel)
+            return self._force_markdown_system(s) if markdown_final else s
+
         if not contexts:
             user_message = build_no_retrieval_user_message(question)
             message = self.llm.invoke(
                 [
-                    {
-                        "role": "system",
-                        "content": self._force_markdown_system(
-                            get_system_no_retrieval_for_channel(channel)
-                        ),
-                    },
+                    {"role": "system", "content": _system_no_retrieval_effective()},
                     {"role": "user", "content": user_message},
                 ]
             )
@@ -764,12 +772,14 @@ class RAGService:
                     "Salida con firma de evaluador en generate(no_context) canal=%s; reintentando con SYSTEM_NO_RETRIEVAL default.",
                     channel,
                 )
+                sys_fb = (
+                    self._force_markdown_system(SYSTEM_NO_RETRIEVAL)
+                    if markdown_final
+                    else SYSTEM_NO_RETRIEVAL
+                )
                 message = self.llm.invoke(
                     [
-                        {
-                            "role": "system",
-                            "content": self._force_markdown_system(SYSTEM_NO_RETRIEVAL),
-                        },
+                        {"role": "system", "content": sys_fb},
                         {"role": "user", "content": user_message},
                     ]
                 )
@@ -779,10 +789,7 @@ class RAGService:
         user_message = self._rag_user_message(question, contexts)
         message = self.llm.invoke(
             [
-                {
-                    "role": "system",
-                    "content": self._force_markdown_system(get_system_rag_for_channel(channel)),
-                },
+                {"role": "system", "content": _system_rag_effective()},
                 {"role": "user", "content": user_message},
             ]
         )
@@ -792,12 +799,10 @@ class RAGService:
                 "Salida con firma de evaluador en generate(with_context) canal=%s; reintentando con SYSTEM_RAG default.",
                 channel,
             )
+            sys_fb = self._force_markdown_system(SYSTEM_RAG) if markdown_final else SYSTEM_RAG
             message = self.llm.invoke(
                 [
-                    {
-                        "role": "system",
-                        "content": self._force_markdown_system(SYSTEM_RAG),
-                    },
+                    {"role": "system", "content": sys_fb},
                     {"role": "user", "content": user_message},
                 ]
             )

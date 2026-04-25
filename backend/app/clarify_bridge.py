@@ -46,7 +46,7 @@ async def _classic_rag_answer(
     q_stripped = (question or "").strip()
     if not q_stripped:
         logger.warning("Pregunta vacía o solo espacios: se omite retrieve y expansión")
-        return rag.generate(question or "", [], channel=channel)
+        return rag.generate(question or "", [], channel=channel, markdown_final=True)
     if settings.rag_clarify_semantic_expand:
         ret_q = await expand_query_async(q_stripped, rag.llm)
         if not ret_q.strip():
@@ -54,7 +54,7 @@ async def _classic_rag_answer(
     else:
         ret_q = q_stripped
     chunks = rag.retrieve(ret_q)
-    return rag.generate(question, chunks, channel=channel)
+    return rag.generate(question, chunks, channel=channel, markdown_final=True)
 
 
 async def run_user_turn(
