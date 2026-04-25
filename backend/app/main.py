@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -41,6 +42,8 @@ logger = logging.getLogger("rag_qc")
 _settings: Settings | None = None
 _rag: RAGService | None = None
 _whatsapp_poll_task: asyncio.Task[None] | None = None
+_ingest_jobs: dict[str, dict[str, Any]] = {}
+_ingest_jobs_lock = threading.Lock()
 
 
 def get_settings() -> Settings:
@@ -177,6 +180,26 @@ class IngestResponse(BaseModel):
     skipped_already_indexed: int = 0
 
 
+class IngestStartResponse(BaseModel):
+    task_id: str
+    status: Literal["running"] = "running"
+
+
+class IngestProgressResponse(BaseModel):
+    task_id: str
+    status: Literal["running", "completed", "failed"]
+    progress_percent: int = 0
+    current_file: str | None = None
+    file_index: int = 0
+    total_files: int = 0
+    stage: str = "pending"
+    messages: list[str] = Field(default_factory=list)
+    started_at: float
+    updated_at: float
+    result: IngestResponse | None = None
+    error: str | None = None
+
+
 class ResetIndexResponse(BaseModel):
     status: str
     collection: str
@@ -286,6 +309,198 @@ class ConfigPublic(BaseModel):
     whatsapp_poll_mode: str
     whatsapp_api_base_url: str
     whatsapp_poll_interval_sec: float
+
+
+def _ingest_job_create(total_files: int, force: bool) -> str:
+    now = time.time()
+    task_id = str(uuid.uuid4())
+    with _ingest_jobs_lock:
+        _ingest_jobs[task_id] = {
+            "task_id": task_id,
+            "status": "running",
+            "progress_percent": 0,
+            "current_file": None,
+            "file_index": 0,
+            "total_files": total_files,
+            "stage": "pending",
+            "messages": [],
+            "started_at": now,
+            "updated_at": now,
+            "result": None,
+            "error": None,
+            "force": force,
+        }
+    return task_id
+
+
+def _ingest_job_patch(task_id: str, **patch: Any) -> None:
+    with _ingest_jobs_lock:
+        job = _ingest_jobs.get(task_id)
+        if not job:
+            return
+        job.update(patch)
+        job["updated_at"] = time.time()
+
+
+def _ingest_job_add_message(task_id: str, msg: str) -> None:
+    with _ingest_jobs_lock:
+        job = _ingest_jobs.get(task_id)
+        if not job:
+            return
+        job["messages"] = [*job.get("messages", []), msg]
+        job["updated_at"] = time.time()
+
+
+def _ingest_job_get(task_id: str) -> dict[str, Any] | None:
+    with _ingest_jobs_lock:
+        job = _ingest_jobs.get(task_id)
+        if not job:
+            return None
+        return dict(job)
+
+
+async def _read_uploads_payload(
+    files: list[UploadFile], settings: Settings
+) -> list[tuple[str, bytes]]:
+    payload: list[tuple[str, bytes]] = []
+    for upload in files:
+        fname = (upload.filename or "sin_nombre").strip() or "sin_nombre"
+        raw = await upload.read()
+        if len(raw) > settings.max_upload_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Archivo {upload.filename} supera el límite de {settings.max_upload_bytes} bytes",
+            )
+        payload.append((fname, raw))
+    return payload
+
+
+async def _run_ingest_payload(
+    payload: list[tuple[str, bytes]], force: bool, task_id: str | None = None
+) -> IngestResponse:
+    settings = get_settings()
+    if not settings.openai_api_key.strip():
+        raise HTTPException(status_code=401, detail="Falta OPENAI_API_KEY en el servidor")
+    rag = require_rag()
+    total_chunks = 0
+    processed = 0
+    skipped_dup = 0
+    messages: list[str] = []
+    total_files = len(payload)
+    for idx, (fname, raw) in enumerate(payload):
+        if task_id is not None:
+            p = int((idx / max(total_files, 1)) * 100)
+            _ingest_job_patch(
+                task_id,
+                file_index=idx + 1,
+                current_file=fname,
+                progress_percent=max(0, min(99, p)),
+                stage="checking-source",
+            )
+        t0 = time.perf_counter()
+        if not force:
+            n_prev = await asyncio.to_thread(rag.chunk_count_for_source, fname)
+            if n_prev > 0:
+                skipped_dup += 1
+                msg = (
+                    f"{fname}: ya indexado en el RAG ({n_prev} fragmentos). "
+                    "No hace falta volver a indexarlo. Para reemplazar: elimina la fuente en la lista, "
+                    "o vuelve a subir con el parámetro `force=true` en POST /ingest?force=true."
+                )
+                messages.append(msg)
+                if task_id is not None:
+                    _ingest_job_add_message(task_id, msg)
+                logger.info(
+                    "Ingest omitido (ya indexado): %s (%s fragmentos previos)", fname, n_prev
+                )
+                await asyncio.sleep(0)
+                continue
+        if force:
+            n_old = await asyncio.to_thread(rag.chunk_count_for_source, fname)
+            if n_old > 0:
+                removed = await asyncio.to_thread(rag.delete_indexed_source, fname)
+                logger.info(
+                    "Ingest force: se quitaron %s fragmentos de la fuente %s antes de reindexar",
+                    removed,
+                    fname,
+                )
+        try:
+            if task_id is not None:
+                _ingest_job_patch(task_id, stage="extracting-text")
+            text = await asyncio.to_thread(
+                load_document_bytes,
+                fname,
+                raw,
+                find_tables_max_pages=settings.pdf_ingest_find_tables_max_pages,
+                pdf_ocr_enabled=settings.pdf_ocr_enabled,
+                pdf_ocr_max_pages=settings.pdf_ocr_max_pages,
+                pdf_ocr_trigger_total_text=settings.pdf_ocr_trigger_total_text,
+                pdf_ocr_dpi=settings.pdf_ocr_dpi,
+                pdf_ocr_lang=settings.pdf_ocr_lang,
+            )
+        except ValueError as e:
+            msg = f"Omitido {fname}: {e}"
+            messages.append(msg)
+            if task_id is not None:
+                _ingest_job_add_message(task_id, msg)
+            continue
+        logger.info(
+            "Ingest %s: texto extraído (~%d caracteres), generando embeddings…",
+            fname,
+            len(text),
+        )
+        try:
+            if task_id is not None:
+                _ingest_job_patch(task_id, stage="embedding-and-indexing")
+            n = await asyncio.to_thread(rag.ingest_text, text, fname)
+        except Exception as e:
+            logger.exception("Ingest Chroma/embedding falló en %s", fname)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error al indexar {fname}: {e!s}. "
+                "Si el mensaje habla de dimensión de embedding, usa POST /ingest/reset y vuelve a subir.",
+            ) from e
+        if n == 0 and (text or "").strip():
+            logger.warning(
+                "Ingest %s: 0 trozos; texto len=%d (revisa min_chars, PDF escaneado o logs)",
+                fname,
+                len(text),
+            )
+        elapsed = time.perf_counter() - t0
+        total_chunks += n
+        processed += 1
+        if n == 0 and (text or "").strip():
+            msg = (
+                f"{fname}: 0 fragmentos (texto extraído {len(text):,} car.). "
+                "Revisa CHUNK_MIN_CHARS, Tesseract en PATH (brew install tesseract tesseract-lang), PDF_OCR_*; "
+                "o PDF_INGEST_FIND_TABLES_MAX_PAGES (ahora find_tables: "
+                f"{settings.pdf_ingest_find_tables_max_pages or '0 (sin límite)'}; "
+                f"OCR max págs: {settings.pdf_ocr_max_pages}, activo: {settings.pdf_ocr_enabled})."
+            )
+            messages.append(msg)
+        else:
+            msg = f"{fname}: {n} fragmentos indexados"
+            messages.append(msg)
+        if task_id is not None:
+            done = int(((idx + 1) / max(total_files, 1)) * 100)
+            _ingest_job_add_message(task_id, msg)
+            _ingest_job_patch(task_id, progress_percent=max(1, min(99, done)))
+        logger.info(
+            "Ingest %s: %d fragmentos en %.1f s",
+            fname,
+            n,
+            elapsed,
+        )
+        await asyncio.sleep(0)
+    total_in_index = rag.collection_chunk_count()
+    return IngestResponse(
+        files_processed=processed,
+        chunks_added=total_chunks,
+        messages=messages,
+        chunk_count=total_in_index,
+        ready=True,
+        skipped_already_indexed=skipped_dup,
+    )
 
 
 @app.get("/health")
@@ -470,115 +685,72 @@ async def ingest(
         description="Si true, elimina la fuente con el mismo nombre en el índice (si existía) y vuelve a indexar. Si false, no hace nada si ya estaba indexada.",
     ),
 ):
-    settings = get_settings()
-    if not settings.openai_api_key.strip():
-        raise HTTPException(
-            status_code=401, detail="Falta OPENAI_API_KEY en el servidor"
-        )
-    rag = require_rag()
-    total_chunks = 0
-    processed = 0
-    skipped_dup = 0
-    messages: list[str] = []
-    for upload in files:
-        t0 = time.perf_counter()
-        fname = (upload.filename or "sin_nombre").strip() or "sin_nombre"
-        if not force:
-            n_prev = await asyncio.to_thread(rag.chunk_count_for_source, fname)
-            if n_prev > 0:
-                await upload.read()  # consumir el cuerpo del multipart; si no, queda cuerpo colgado
-                skipped_dup += 1
-                messages.append(
-                    f"{fname}: ya indexado en el RAG ({n_prev} fragmentos). "
-                    "No hace falta volver a indexarlo. Para reemplazar: elimina la fuente en la lista, "
-                    "o vuelve a subir con el parámetro `force=true` en POST /ingest?force=true."
-                )
-                logger.info(
-                    "Ingest omitido (ya indexado): %s (%s fragmentos previos)", fname, n_prev
-                )
-                await asyncio.sleep(0)
-                continue
-        if force:
-            n_old = await asyncio.to_thread(rag.chunk_count_for_source, fname)
-            if n_old > 0:
-                removed = await asyncio.to_thread(rag.delete_indexed_source, fname)
-                logger.info(
-                    "Ingest force: se quitaron %s fragmentos de la fuente %s antes de reindexar",
-                    removed,
-                    fname,
-                )
-        raw = await upload.read()
-        if len(raw) > settings.max_upload_bytes:
-            raise HTTPException(
-                status_code=413,
-                detail=f"Archivo {upload.filename} supera el límite de {settings.max_upload_bytes} bytes",
-            )
+    payload = await _read_uploads_payload(files, get_settings())
+    return await _run_ingest_payload(payload, force=force)
+
+
+@app.post("/ingest/start", response_model=IngestStartResponse)
+async def ingest_start(
+    files: list[UploadFile] = File(...),
+    force: bool = Query(
+        False,
+        description="Si true, elimina la fuente con el mismo nombre en el índice (si existía) y vuelve a indexar. Si false, no hace nada si ya estaba indexada.",
+    ),
+):
+    payload = await _read_uploads_payload(files, get_settings())
+    task_id = _ingest_job_create(total_files=len(payload), force=force)
+
+    async def _runner() -> None:
         try:
-            # PDF/MD grande: extrae en hilo para no bloquear el bucle de eventos (/chat, /health siguen vivos).
-            text = await asyncio.to_thread(
-                load_document_bytes,
-                fname,
-                raw,
-                find_tables_max_pages=settings.pdf_ingest_find_tables_max_pages,
-                pdf_ocr_enabled=settings.pdf_ocr_enabled,
-                pdf_ocr_max_pages=settings.pdf_ocr_max_pages,
-                pdf_ocr_trigger_total_text=settings.pdf_ocr_trigger_total_text,
-                pdf_ocr_dpi=settings.pdf_ocr_dpi,
-                pdf_ocr_lang=settings.pdf_ocr_lang,
+            result = await _run_ingest_payload(payload, force=force, task_id=task_id)
+            _ingest_job_patch(
+                task_id,
+                status="completed",
+                progress_percent=100,
+                stage="completed",
+                result=result.model_dump(),
             )
-        except ValueError as e:
-            messages.append(f"Omitido {upload.filename}: {e}")
-            continue
-        logger.info(
-            "Ingest %s: texto extraído (~%d caracteres), generando embeddings…",
-            upload.filename,
-            len(text),
-        )
-        # Indexación (embeddings + Chroma) fuera del hilo principal async; el lock en RAGService serializa escrituras.
-        try:
-            n = await asyncio.to_thread(rag.ingest_text, text, fname)
+        except HTTPException as e:
+            detail = e.detail if isinstance(e.detail, str) else str(e.detail)
+            _ingest_job_patch(
+                task_id,
+                status="failed",
+                stage="failed",
+                error=detail,
+            )
         except Exception as e:
-            logger.exception("Ingest Chroma/embedding falló en %s", upload.filename)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error al indexar {upload.filename}: {e!s}. "
-                "Si el mensaje habla de dimensión de embedding, usa POST /ingest/reset y vuelve a subir.",
-            ) from e
-        if n == 0 and (text or "").strip():
-            logger.warning(
-                "Ingest %s: 0 trozos; texto len=%d (revisa min_chars, PDF escaneado o logs)",
-                upload.filename,
-                len(text),
+            logger.exception("Ingest async falló (task_id=%s)", task_id)
+            _ingest_job_patch(
+                task_id,
+                status="failed",
+                stage="failed",
+                error=str(e),
             )
-        elapsed = time.perf_counter() - t0
-        total_chunks += n
-        processed += 1
-        if n == 0 and (text or "").strip():
-            messages.append(
-                f"{upload.filename}: 0 fragmentos (texto extraído {len(text):,} car.). "
-                "Revisa CHUNK_MIN_CHARS, Tesseract en PATH (brew install tesseract tesseract-lang), PDF_OCR_*; "
-                "o PDF_INGEST_FIND_TABLES_MAX_PAGES (ahora find_tables: "
-                f"{settings.pdf_ingest_find_tables_max_pages or '0 (sin límite)'}; "
-                f"OCR max págs: {settings.pdf_ocr_max_pages}, activo: {settings.pdf_ocr_enabled})."
-            )
-        else:
-            messages.append(f"{upload.filename}: {n} fragmentos indexados")
-        logger.info(
-            "Ingest %s: %d fragmentos en %.1f s",
-            upload.filename,
-            n,
-            elapsed,
-        )
-        # Cede el bucle de eventos entre archivos (multimodal) para atender otras peticiones.
-        await asyncio.sleep(0)
-    total_in_index = rag.collection_chunk_count()
-    return IngestResponse(
-        files_processed=processed,
-        chunks_added=total_chunks,
-        messages=messages,
-        chunk_count=total_in_index,
-        ready=True,
-        skipped_already_indexed=skipped_dup,
+
+    asyncio.create_task(_runner(), name=f"ingest:{task_id}")
+    return IngestStartResponse(task_id=task_id)
+
+
+@app.get("/ingest/progress/{task_id}", response_model=IngestProgressResponse)
+def ingest_progress(task_id: str):
+    job = _ingest_job_get(task_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"No existe task_id: {task_id}")
+    result_payload = job.get("result")
+    result = IngestResponse(**result_payload) if isinstance(result_payload, dict) else None
+    return IngestProgressResponse(
+        task_id=task_id,
+        status=job.get("status", "running"),
+        progress_percent=int(job.get("progress_percent", 0)),
+        current_file=job.get("current_file"),
+        file_index=int(job.get("file_index", 0)),
+        total_files=int(job.get("total_files", 0)),
+        stage=str(job.get("stage", "pending")),
+        messages=list(job.get("messages", [])),
+        started_at=float(job.get("started_at", time.time())),
+        updated_at=float(job.get("updated_at", time.time())),
+        result=result,
+        error=job.get("error"),
     )
 
 

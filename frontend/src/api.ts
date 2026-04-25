@@ -44,6 +44,26 @@ export type IngestResponse = {
   skipped_already_indexed?: number
 }
 
+export type IngestStartResponse = {
+  task_id: string
+  status: 'running'
+}
+
+export type IngestProgressResponse = {
+  task_id: string
+  status: 'running' | 'completed' | 'failed'
+  progress_percent: number
+  current_file: string | null
+  file_index: number
+  total_files: number
+  stage: string
+  messages: string[]
+  started_at: number
+  updated_at: number
+  result?: IngestResponse | null
+  error?: string | null
+}
+
 async function handle(res: Response): Promise<void> {
   if (!res.ok) {
     let detail = res.statusText
@@ -78,6 +98,34 @@ export async function ingestFiles(
     method: 'POST',
     body: fd,
     signal: ingestAbortSignal(),
+  })
+  await handle(res)
+  return res.json()
+}
+
+export async function startIngestFiles(
+  files: File[],
+  options?: { force?: boolean },
+): Promise<IngestStartResponse> {
+  const fd = new FormData()
+  for (const f of files) fd.append('files', f)
+  const q = options?.force === true ? '?force=true' : ''
+  const res = await fetch(`${base}/ingest/start${q}`, {
+    method: 'POST',
+    body: fd,
+    signal: ingestAbortSignal(),
+  })
+  await handle(res)
+  return res.json()
+}
+
+export async function fetchIngestProgress(taskId: string): Promise<IngestProgressResponse> {
+  const res = await fetch(`${base}/ingest/progress/${encodeURIComponent(taskId)}`, {
+    cache: 'no-store',
+    signal:
+      typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+        ? AbortSignal.timeout(30_000)
+        : undefined,
   })
   await handle(res)
   return res.json()

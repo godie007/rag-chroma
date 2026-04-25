@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   deleteIndexedSource,
+  fetchIngestProgress,
   fetchIndexedSources,
-  ingestFiles,
   resetVectorIndex,
+  startIngestFiles,
   type ConfigPublic,
+  type IngestProgressResponse,
   type IngestResponse,
   type StatsResponse,
 } from '../api'
@@ -22,6 +24,35 @@ function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function stageLabel(stage: string): string {
+  switch (stage) {
+    case 'checking-source':
+      return 'Verificando índice'
+    case 'extracting-text':
+      return 'Extrayendo texto'
+    case 'embedding-and-indexing':
+      return 'Generando embeddings e indexando'
+    case 'completed':
+      return 'Completado'
+    case 'failed':
+      return 'Falló'
+    default:
+      return 'Preparando'
+  }
+}
+
+async function waitForIngestTask(
+  taskId: string,
+  onTick: (p: IngestProgressResponse) => void,
+): Promise<IngestProgressResponse> {
+  for (;;) {
+    const p = await fetchIngestProgress(taskId)
+    onTick(p)
+    if (p.status === 'completed' || p.status === 'failed') return p
+    await new Promise((r) => setTimeout(r, 1000))
+  }
 }
 
 /** Reintenta GET /stats cuando el contador tarda o va a otro worker (0 mientras el índice ya tiene datos). */
@@ -122,6 +153,7 @@ export function DocumentsView({
   const [ingestHint, setIngestHint] = useState<string | null>(null)
   const [ingestFilePosition, setIngestFilePosition] = useState<{ n: number; total: number } | null>(null)
   const [ingestCurrentName, setIngestCurrentName] = useState<string | null>(null)
+  const [ingestStageLabel, setIngestStageLabel] = useState<string | null>(null)
   /** true: POST /ingest?force=true — borra la fuente con ese nombre y vuelve a indexar. */
   const [forceReindex, setForceReindex] = useState(false)
 
@@ -228,6 +260,7 @@ export function DocumentsView({
     setIngestProgress(1)
     setIngestFilePosition({ n: 1, total: pending.length })
     setIngestCurrentName(pending[0]?.file.name ?? null)
+    setIngestStageLabel('Preparando')
     const total = pending.length
     let lastIngestResponse: IngestResponse | null = null
     let priorIndexTotal = stats?.chunk_count ?? 0
@@ -243,7 +276,23 @@ export function DocumentsView({
         )
         setIngestProgress(Math.max(1, Math.round((i / total) * 100)))
         try {
-          const res = await ingestFiles([item.file], { force: forceReindex })
+          const started = await startIngestFiles([item.file], { force: forceReindex })
+          const done = await waitForIngestTask(started.task_id, (p) => {
+            setIngestCurrentName(p.current_file || item.file.name)
+            setIngestStageLabel(stageLabel(p.stage))
+            const filePart = Math.max(0, i)
+            const step = total > 0 ? 100 / total : 100
+            const inner = Math.max(0, Math.min(100, p.progress_percent))
+            const globalProgress = Math.min(99, Math.round(filePart * step + (inner / 100) * step))
+            setIngestProgress(Math.max(1, globalProgress))
+          })
+          if (done.status === 'failed') {
+            throw new Error(done.error || 'Falló la tarea de ingesta en el servidor')
+          }
+          const res = done.result
+          if (!res) {
+            throw new Error('La tarea terminó sin resultado de ingesta')
+          }
           lastIngestResponse = res
           const msg = res.messages[0] ?? ''
           const isAlreadyIndexed =
@@ -298,6 +347,7 @@ export function DocumentsView({
         setIngestProgress(Math.min(99, Math.round(((i + 1) / total) * 100)))
       }
       setIngestProgress(100)
+      setIngestStageLabel('Completado')
       const final = await onRefreshStats()
       const authoritativeCount =
         final && final.chunk_count > 0
@@ -351,6 +401,7 @@ export function DocumentsView({
         setIngestDoneMessage(null)
         setIngestFilePosition(null)
         setIngestCurrentName(null)
+        setIngestStageLabel(null)
       }, 3200)
     }
   }, [onRefreshStats, onRagStatsPatch, stats?.chunk_count, forceReindex])
@@ -614,9 +665,9 @@ export function DocumentsView({
                   />
                 </div>
                 <p className="text-[10px] text-on-surface-variant mt-2 m-0 leading-relaxed">
-                  El progreso es por archivos en cola; el total de fragmentos en el encabezado se confirma con el mensaje
-                  al terminar. Los PDFs grandes pueden tardar mucho (sigue viendo &quot;Indexando&quot; y el icono
-                  &quot;Procesando&quot; en la cola abajo).
+                  {ingestStageLabel
+                    ? `Estado backend: ${ingestStageLabel}. La UI sigue consultando progreso hasta que finaliza la ingesta completa.`
+                    : 'Mostrando progreso de ingesta del backend.'}
                 </p>
               </div>
             )}
