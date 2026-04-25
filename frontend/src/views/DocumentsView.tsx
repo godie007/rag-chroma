@@ -245,7 +245,7 @@ export function DocumentsView({
           setQueue((q) =>
             q.map((x) => {
               if (x.id !== item.id) return x
-              if (msg.startsWith('Omitido')) {
+              if (msg.startsWith('Omitido') || /: 0 fragmentos/i.test(msg)) {
                 return { ...x, status: 'error' as const, detail: msg }
               }
               return { ...x, status: 'indexed' as const, detail: msg }

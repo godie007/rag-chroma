@@ -212,6 +212,21 @@ class RAGService:
                 merge_min_chars=self.settings.chunk_min_chars,
                 merge_hard_max=merge_hard_max,
             )
+            if not chunk_strings and text_norm.strip():
+                logger.warning(
+                    "Fragmentación devolvió 0 trozos (len=%d, source=%s); reintento con split directo",
+                    len(text_norm),
+                    source_name,
+                )
+                chunk_strings = self.splitter.split_text(text_norm)
+            if not chunk_strings and text_norm.strip():
+                cs, co = self.settings.chunk_size, self.settings.chunk_overlap
+                step = max(1, cs - co)
+                chunk_strings = [
+                    text_norm[i : i + cs] for i in range(0, len(text_norm), step)
+                ]
+                if not chunk_strings and text_norm.strip():
+                    chunk_strings = [text_norm]
             to_index = (
                 self._contextualize_for_ingest(text_norm, chunk_strings)
                 if (self._contextual_llm and chunk_strings)

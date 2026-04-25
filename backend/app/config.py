@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     chunk_overlap: int = 280
     chunk_min_chars: int = 400
     chunk_merge_hard_max: int = 0
+    # Ingesta PDF: PyMuPDF find_tables() por cada página degrada memoria y tiempo (normas 600+ pág. tipo CEC).
+    # 0 = sin límite (comportamiento anterior: tablas estruct. en todas las págs). >0 = solo pág. 1..N; resto: solo get_text.
+    pdf_ingest_find_tables_max_pages: int = Field(
+        0,
+        ge=0,
+        le=50_000,
+        description="0=todas las págs con find_tables; N>0=limita tablas a pág. 1..N (recom. 300–500 en PDFs enormes).",
+    )
     top_k: int = 8
     use_mmr: bool = True
     mmr_fetch_k: int = 60

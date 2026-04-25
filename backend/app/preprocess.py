@@ -297,7 +297,8 @@ def _reduce_pdf_drawing_artifacts(text: str) -> str:
     return joined.strip()
 
 
-def _pdf_text_pymupdf(data: bytes) -> str:
+def _pdf_text_pymupdf(data: bytes, *, find_tables_max_pages: int = 0) -> str:
+    """find_tables_max_pages: 0 = en todas las págs; N>0 = solo 1..N (ahorra mucho en PDFs masivos)."""
     doc = fitz.open(stream=data, filetype="pdf")  # abrir PDF desde memoria
     try:
         parts: list[str] = []
@@ -309,7 +310,10 @@ def _pdf_text_pymupdf(data: bytes) -> str:
             except (TypeError, ValueError):
                 txt = page.get_text()  # fallback si sort=True no está soportado
             body = (txt or "").strip()
-            tables_md = _page_tables_markdown(page, page_no)
+            if find_tables_max_pages > 0 and page_no > find_tables_max_pages:
+                tables_md = ""
+            else:
+                tables_md = _page_tables_markdown(page, page_no)
             if tables_md:
                 block = (
                     f"{body}\n\n---\n\n## Tablas (extracción estructurada, Markdown)\n\n{tables_md}"
@@ -333,14 +337,19 @@ def _pdf_text_pypdf(data: bytes) -> str:
     return "\n\n".join(parts)
 
 
-def load_document_bytes(filename: str, data: bytes) -> str:
+def load_document_bytes(
+    filename: str, data: bytes, *, find_tables_max_pages: int = 0
+) -> str:
+    """``find_tables_max_pages``: reenvía a PyMuPDF; 0 = sin límite; N>0 limita búsqueda de tablas a las primeras N págs."""
     suffix = Path(filename).suffix.lower()  # extensión para elegir extractor
     if suffix in {".txt", ".md", ".markdown"}:
         return clean_text(data.decode("utf-8", errors="replace"))  # UTF-8; bytes inválidos → carácter sustituto
     if suffix == ".pdf":
         raw = ""
         try:
-            raw = _pdf_text_pymupdf(data)  # extracción preferida: mejor orden de lectura
+            raw = _pdf_text_pymupdf(
+                data, find_tables_max_pages=find_tables_max_pages
+            )  # extracción preferida: mejor orden de lectura
         except Exception as e:
             logger.warning("PyMuPDF no disponible o falló (%s); usando pypdf.", e)
         if len(raw.strip()) < 200:

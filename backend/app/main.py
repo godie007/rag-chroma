@@ -270,6 +270,7 @@ class ConfigPublic(BaseModel):
     rag_clarification_enabled: bool
     rag_clarification_max_rounds: int
     rag_clarify_semantic_expand: bool
+    pdf_ingest_find_tables_max_pages: int
     parent_rerank_enabled: bool
     rag_retriever_k: int
     rag_reranker_top_n: int
@@ -401,6 +402,7 @@ def public_config():
         rag_clarification_enabled=s.rag_clarification_enabled,
         rag_clarification_max_rounds=s.rag_clarification_max_rounds,
         rag_clarify_semantic_expand=s.rag_clarify_semantic_expand,
+        pdf_ingest_find_tables_max_pages=s.pdf_ingest_find_tables_max_pages,
         parent_rerank_enabled=s.parent_rerank_enabled,
         rag_retriever_k=s.rag_retriever_k,
         rag_reranker_top_n=s.rag_reranker_top_n,
@@ -470,7 +472,10 @@ async def ingest(files: list[UploadFile] = File(...)):
         try:
             # PDF/MD grande: extrae en hilo para no bloquear el bucle de eventos (/chat, /health siguen vivos).
             text = await asyncio.to_thread(
-                load_document_bytes, upload.filename or "unknown", raw
+                load_document_bytes,
+                upload.filename or "unknown",
+                raw,
+                find_tables_max_pages=settings.pdf_ingest_find_tables_max_pages,
             )
         except ValueError as e:
             messages.append(f"Omitido {upload.filename}: {e}")
@@ -481,13 +486,35 @@ async def ingest(files: list[UploadFile] = File(...)):
             len(text),
         )
         # Indexación (embeddings + Chroma) fuera del hilo principal async; el lock en RAGService serializa escrituras.
-        n = await asyncio.to_thread(
-            rag.ingest_text, text, upload.filename or "sin_nombre"
-        )
+        try:
+            n = await asyncio.to_thread(
+                rag.ingest_text, text, upload.filename or "sin_nombre"
+            )
+        except Exception as e:
+            logger.exception("Ingest Chroma/embedding falló en %s", upload.filename)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error al indexar {upload.filename}: {e!s}. "
+                "Si el mensaje habla de dimensión de embedding, usa POST /ingest/reset y vuelve a subir.",
+            ) from e
+        if n == 0 and (text or "").strip():
+            logger.warning(
+                "Ingest %s: 0 trozos; texto len=%d (revisa min_chars, PDF escaneado o logs)",
+                upload.filename,
+                len(text),
+            )
         elapsed = time.perf_counter() - t0
         total_chunks += n
         processed += 1
-        messages.append(f"{upload.filename}: {n} fragmentos indexados")
+        if n == 0 and (text or "").strip():
+            messages.append(
+                f"{upload.filename}: 0 fragmentos (texto extraído {len(text):,} car.). "
+                "Posible PDF imagen (OCR), o umbral de trozos: revisa log del backend y CHUNK_MIN_CHARS; "
+                "o ajusta PDF_INGEST_FIND_TABLES_MAX_PAGES (0=todas las págs con find_tables; 300-500 en PDFs enormes; "
+                f"ahora: {settings.pdf_ingest_find_tables_max_pages or '0 (sin límite)'})."
+            )
+        else:
+            messages.append(f"{upload.filename}: {n} fragmentos indexados")
         logger.info(
             "Ingest %s: %d fragmentos en %.1f s",
             upload.filename,

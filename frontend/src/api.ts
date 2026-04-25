@@ -179,6 +179,7 @@ export type ConfigPublic = {
   rag_clarification_enabled: boolean
   rag_clarification_max_rounds: number
   rag_clarify_semantic_expand: boolean
+  pdf_ingest_find_tables_max_pages: number
   parent_rerank_enabled: boolean
   rag_retriever_k: number
   rag_reranker_top_n: number
