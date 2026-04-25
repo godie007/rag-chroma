@@ -164,6 +164,24 @@ class ChromaStore:
         except Exception:
             return 0
 
+    def count_by_source(self, source_name: str) -> int:
+        """Cuenta vectores cuyo metadato ``source`` coincide (exacto)."""
+        name = str(source_name).strip()
+        if not name:
+            return 0
+        col = self.vectorstore._collection
+        try:
+            res = col.get(where={"source": name}, include=[])
+        except Exception as e:
+            logger.debug("Chroma get count_by_source: %s", e)
+            return 0
+        if not res or not isinstance(res, dict):
+            return 0
+        ids = res.get("ids")
+        if not ids:
+            return 0
+        return len(ids)
+
     def list_distinct_sources(self) -> list[str]:
         """Nombres de fuente únicos (`metadata.source`) de todos los vectores en la colección."""
         col = self.vectorstore._collection

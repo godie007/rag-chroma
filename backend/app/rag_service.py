@@ -158,6 +158,13 @@ class RAGService:
             a |= set(self._chroma_pr.list_distinct_sources())
         return sorted(a)
 
+    def chunk_count_for_source(self, source_name: str) -> int:
+        """Fragmentos asociados a una fuente (plano + parent–child si aplica)."""
+        n = self._chroma.count_by_source(source_name)
+        if self._chroma_pr is not None:
+            n += self._chroma_pr.count_by_source(source_name)
+        return n
+
     def delete_indexed_source(self, source_name: str) -> int:
         """Quita del índice todos los trozos asociados a una fuente (metadato ``source``)."""
         with self._index_write_lock:

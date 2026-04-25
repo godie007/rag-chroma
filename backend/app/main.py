@@ -173,6 +173,8 @@ class IngestResponse(BaseModel):
     # Total de vectores en Chroma al terminar (mismo proceso que escribió; GET /stats puede retrasar o ir a otro worker).
     chunk_count: int = 0
     ready: bool = True
+    # Archivos que ya existían bajo el mismo ``source`` y no se reindexaron (sin ``force``).
+    skipped_already_indexed: int = 0
 
 
 class ResetIndexResponse(BaseModel):
@@ -461,7 +463,13 @@ def whatsapp_allowlist_revert_env():
 
 
 @app.post("/ingest", response_model=IngestResponse)
-async def ingest(files: list[UploadFile] = File(...)):
+async def ingest(
+    files: list[UploadFile] = File(...),
+    force: bool = Query(
+        False,
+        description="Si true, elimina la fuente con el mismo nombre en el índice (si existía) y vuelve a indexar. Si false, no hace nada si ya estaba indexada.",
+    ),
+):
     settings = get_settings()
     if not settings.openai_api_key.strip():
         raise HTTPException(
@@ -470,9 +478,35 @@ async def ingest(files: list[UploadFile] = File(...)):
     rag = require_rag()
     total_chunks = 0
     processed = 0
+    skipped_dup = 0
     messages: list[str] = []
     for upload in files:
         t0 = time.perf_counter()
+        fname = (upload.filename or "sin_nombre").strip() or "sin_nombre"
+        if not force:
+            n_prev = await asyncio.to_thread(rag.chunk_count_for_source, fname)
+            if n_prev > 0:
+                await upload.read()  # consumir el cuerpo del multipart; si no, queda cuerpo colgado
+                skipped_dup += 1
+                messages.append(
+                    f"{fname}: ya indexado en el RAG ({n_prev} fragmentos). "
+                    "No hace falta volver a indexarlo. Para reemplazar: elimina la fuente en la lista, "
+                    "o vuelve a subir con el parámetro `force=true` en POST /ingest?force=true."
+                )
+                logger.info(
+                    "Ingest omitido (ya indexado): %s (%s fragmentos previos)", fname, n_prev
+                )
+                await asyncio.sleep(0)
+                continue
+        if force:
+            n_old = await asyncio.to_thread(rag.chunk_count_for_source, fname)
+            if n_old > 0:
+                removed = await asyncio.to_thread(rag.delete_indexed_source, fname)
+                logger.info(
+                    "Ingest force: se quitaron %s fragmentos de la fuente %s antes de reindexar",
+                    removed,
+                    fname,
+                )
         raw = await upload.read()
         if len(raw) > settings.max_upload_bytes:
             raise HTTPException(
@@ -483,7 +517,7 @@ async def ingest(files: list[UploadFile] = File(...)):
             # PDF/MD grande: extrae en hilo para no bloquear el bucle de eventos (/chat, /health siguen vivos).
             text = await asyncio.to_thread(
                 load_document_bytes,
-                upload.filename or "unknown",
+                fname,
                 raw,
                 find_tables_max_pages=settings.pdf_ingest_find_tables_max_pages,
                 pdf_ocr_enabled=settings.pdf_ocr_enabled,
@@ -502,9 +536,7 @@ async def ingest(files: list[UploadFile] = File(...)):
         )
         # Indexación (embeddings + Chroma) fuera del hilo principal async; el lock en RAGService serializa escrituras.
         try:
-            n = await asyncio.to_thread(
-                rag.ingest_text, text, upload.filename or "sin_nombre"
-            )
+            n = await asyncio.to_thread(rag.ingest_text, text, fname)
         except Exception as e:
             logger.exception("Ingest Chroma/embedding falló en %s", upload.filename)
             raise HTTPException(
@@ -546,6 +578,7 @@ async def ingest(files: list[UploadFile] = File(...)):
         messages=messages,
         chunk_count=total_in_index,
         ready=True,
+        skipped_already_indexed=skipped_dup,
     )
 
 

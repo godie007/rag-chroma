@@ -40,6 +40,8 @@ export type IngestResponse = {
   /** Total de fragmentos en Chroma al terminar (misma petición / proceso que indexó; más fiable que GET /stats justo detrás). */
   chunk_count?: number
   ready?: boolean
+  /** Archivos que ya existían bajo el mismo nombre y se omitieron (sin force). */
+  skipped_already_indexed?: number
 }
 
 async function handle(res: Response): Promise<void> {
@@ -65,10 +67,14 @@ function ingestAbortSignal(): AbortSignal | undefined {
   return undefined
 }
 
-export async function ingestFiles(files: File[]): Promise<IngestResponse> {
+export async function ingestFiles(
+  files: File[],
+  options?: { force?: boolean },
+): Promise<IngestResponse> {
   const fd = new FormData()
   for (const f of files) fd.append('files', f)
-  const res = await fetch(`${base}/ingest`, {
+  const q = options?.force === true ? '?force=true' : ''
+  const res = await fetch(`${base}/ingest${q}`, {
     method: 'POST',
     body: fd,
     signal: ingestAbortSignal(),

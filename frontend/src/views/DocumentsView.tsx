@@ -14,7 +14,7 @@ import { Icon } from '../components/Icon'
 type QueueItem = {
   id: string
   file: File
-  status: 'pending' | 'uploading' | 'indexed' | 'error'
+  status: 'pending' | 'uploading' | 'indexed' | 'duplicate' | 'error'
   detail?: string
 }
 
@@ -122,6 +122,8 @@ export function DocumentsView({
   const [ingestHint, setIngestHint] = useState<string | null>(null)
   const [ingestFilePosition, setIngestFilePosition] = useState<{ n: number; total: number } | null>(null)
   const [ingestCurrentName, setIngestCurrentName] = useState<string | null>(null)
+  /** true: POST /ingest?force=true — borra la fuente con ese nombre y vuelve a indexar. */
+  const [forceReindex, setForceReindex] = useState(false)
 
   const maxBytes = config?.max_upload_bytes ?? 25 * 1024 * 1024
   const maxLabel = formatBytes(maxBytes)
@@ -229,6 +231,8 @@ export function DocumentsView({
     const total = pending.length
     let lastIngestResponse: IngestResponse | null = null
     let priorIndexTotal = stats?.chunk_count ?? 0
+    let hadNewChunks = false
+    let duplicateCount = 0
     try {
       for (let i = 0; i < pending.length; i++) {
         const item = pending[i]
@@ -239,12 +243,19 @@ export function DocumentsView({
         )
         setIngestProgress(Math.max(1, Math.round((i / total) * 100)))
         try {
-          const res = await ingestFiles([item.file])
+          const res = await ingestFiles([item.file], { force: forceReindex })
           lastIngestResponse = res
           const msg = res.messages[0] ?? ''
+          const isAlreadyIndexed =
+            (res.skipped_already_indexed ?? 0) > 0 || /ya indexado en el RAG/i.test(msg)
+          if (isAlreadyIndexed) duplicateCount += 1
+          if ((res.chunks_added ?? 0) > 0) hadNewChunks = true
           setQueue((q) =>
             q.map((x) => {
               if (x.id !== item.id) return x
+              if (isAlreadyIndexed) {
+                return { ...x, status: 'duplicate' as const, detail: msg }
+              }
               if (msg.startsWith('Omitido') || /: 0 fragmentos/i.test(msg)) {
                 return { ...x, status: 'error' as const, detail: msg }
               }
@@ -252,16 +263,20 @@ export function DocumentsView({
             }),
           )
           if (!msg.startsWith('Omitido')) {
-            await reconcileAfterIngest(
-              onRefreshStats,
-              onRagStatsPatch,
-              res,
-              priorIndexTotal,
-            )
-            if (typeof res.chunk_count === 'number' && res.chunk_count > 0) {
-              priorIndexTotal = res.chunk_count
+            if ((res.chunks_added ?? 0) > 0) {
+              await reconcileAfterIngest(
+                onRefreshStats,
+                onRagStatsPatch,
+                res,
+                priorIndexTotal,
+              )
+              if (typeof res.chunk_count === 'number' && res.chunk_count > 0) {
+                priorIndexTotal = res.chunk_count
+              } else {
+                priorIndexTotal += res.chunks_added ?? 0
+              }
             } else {
-              priorIndexTotal += res.chunks_added ?? 0
+              void onRefreshStats()
             }
           }
         } catch (err) {
@@ -299,7 +314,12 @@ export function DocumentsView({
           onRagStatsPatch({ chunk_count: lastIngestResponse.chunk_count, ready: true })
         }
       }
-      if (
+      if (!hadNewChunks && duplicateCount === total && total > 0) {
+        setIngestDoneMessage(
+          'Ningún fragmento nuevo: los archivos de la cola ya estaban en el índice (no se duplicó contenido). Para sustituir un documento, marca «Forzar reindexación» o elimina la fuente y vuelve a subirlo.',
+        )
+      } else if (
+        hadNewChunks &&
         lastIngestResponse &&
         typeof lastIngestResponse.chunk_count === 'number' &&
         lastIngestResponse.chunk_count > 0 &&
@@ -333,7 +353,7 @@ export function DocumentsView({
         setIngestCurrentName(null)
       }, 3200)
     }
-  }, [onRefreshStats, onRagStatsPatch, stats?.chunk_count])
+  }, [onRefreshStats, onRagStatsPatch, stats?.chunk_count, forceReindex])
 
   useLayoutEffect(() => {
     if (!ingestLoading) return
@@ -691,6 +711,20 @@ export function DocumentsView({
                 </p>
               )}
               <div className="flex flex-col gap-1.5">
+                <label className="flex items-start gap-2 text-[10px] text-on-surface-variant cursor-pointer max-w-prose">
+                  <input
+                    type="checkbox"
+                    checked={forceReindex}
+                    onChange={(e) => setForceReindex(e.target.checked)}
+                    disabled={ingestLoading}
+                    className="mt-0.5 rounded border-outline text-primary"
+                  />
+                  <span>
+                    <strong className="text-on-surface">Forzar reindexación</strong> (mismo nombre de archivo: quita
+                    la versión en el índice y vuelve a subir). Sin marcar, si ya hay fragmentos con ese nombre se omite
+                    y se avisa.
+                  </span>
+                </label>
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
@@ -720,21 +754,34 @@ export function DocumentsView({
                     <div
                       key={item.id}
                       className={`flex items-center p-4 bg-surface rounded-xl hover:shadow-md transition-shadow relative ${
-                        item.status === 'indexed' ? 'pl-3' : ''
+                        item.status === 'indexed' || item.status === 'duplicate' ? 'pl-3' : ''
                       }`}
                     >
                       {item.status === 'indexed' && (
                         <div className="absolute left-0 top-1/4 bottom-1/4 w-1 bg-secondary rounded-full" />
                       )}
+                      {item.status === 'duplicate' && (
+                        <div className="absolute left-0 top-1/4 bottom-1/4 w-1 bg-tertiary rounded-full" />
+                      )}
                       <div className="flex items-center gap-4 min-w-0 flex-1">
                         <div
                           className={`w-10 h-10 rounded-lg bg-white flex items-center justify-center shrink-0 ${
-                            item.status === 'indexed' ? 'text-secondary' : 'text-slate-400'
+                            item.status === 'indexed'
+                              ? 'text-secondary'
+                              : item.status === 'duplicate'
+                                ? 'text-tertiary'
+                                : 'text-slate-400'
                           }`}
                         >
                           <Icon
-                            name={item.status === 'indexed' ? 'task_alt' : 'description'}
-                            filled={item.status === 'indexed'}
+                            name={
+                              item.status === 'indexed'
+                                ? 'task_alt'
+                                : item.status === 'duplicate'
+                                  ? 'library_books'
+                                  : 'description'
+                            }
+                            filled={item.status === 'indexed' || item.status === 'duplicate'}
                           />
                         </div>
                         <div className="min-w-0">
@@ -744,6 +791,7 @@ export function DocumentsView({
                             {item.status === 'pending' && 'Pendiente'}
                             {item.status === 'uploading' && 'Procesando'}
                             {item.status === 'indexed' && 'Indexado'}
+                            {item.status === 'duplicate' && 'Ya en el índice'}
                             {item.status === 'error' && (item.detail ?? 'Error')}
                           </div>
                         </div>
