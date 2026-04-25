@@ -9,6 +9,13 @@ import fitz
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
 
+try:
+    import pytesseract
+    from PIL import Image
+except ImportError:  # pip install pytesseract Pillow
+    pytesseract = None  # type: ignore[assignment]
+    Image = None  # type: ignore[assignment]
+
 logger = logging.getLogger("rag_qc")
 
 
@@ -337,10 +344,91 @@ def _pdf_text_pypdf(data: bytes) -> str:
     return "\n\n".join(parts)
 
 
-def load_document_bytes(
-    filename: str, data: bytes, *, find_tables_max_pages: int = 0
+def _ocr_one_page_pytesseract(page: fitz.Page, *, dpi: int, lang: str) -> str:
+    """Una página: raster en escala de grises (rápida) + Tesseract. Nada si falla el binario o dependencias."""
+    if pytesseract is None or Image is None:
+        return ""
+    try:
+        pix = page.get_pixmap(dpi=dpi, colorspace=fitz.csGRAY, alpha=False)
+    except (RuntimeError, ValueError) as e:
+        logger.debug("OCR get_pixmap: %s", e)
+        return ""
+    if pix.width < 2 or pix.height < 2:
+        return ""
+    try:
+        img = Image.frombytes("L", (pix.width, pix.height), pix.samples)
+    except Exception as e:
+        logger.debug("OCR PIL: %s", e)
+        return ""
+    for lang_try in (lang, "eng"):
+        try:
+            out = pytesseract.image_to_string(
+                img,
+                lang=lang_try,
+                config="--oem 1 --psm 3",
+            )
+            t = (out or "").strip()
+            if t:
+                return t
+        except Exception as e:
+            if lang_try == lang:
+                logger.debug("OCR tesseract (lang=%s): %s", lang_try, e)
+            continue
+    return ""
+
+
+def _pdf_ocr_sweep(
+    data: bytes,
+    *,
+    max_pages: int,
+    dpi: int,
+    lang: str,
 ) -> str:
-    """``find_tables_max_pages``: reenvía a PyMuPDF; 0 = sin límite; N>0 limita búsqueda de tablas a las primeras N págs."""
+    """OCR por páginas (cap acotado) solo para PDFs escaneados. Requiere `tesseract` en PATH (brew/apt)."""
+    if max_pages < 1:
+        return ""
+    if pytesseract is None:
+        logger.warning("OCR desactivado: instale pytesseract y Pillow (pip install -r requirements.txt).")
+        return ""
+    try:
+        pytesseract.get_tesseract_version()
+    except Exception as e:
+        logger.warning("OCR desactivado: Tesseract no disponible en PATH (%s). macOS: brew install tesseract tesseract-lang", e)
+        return ""
+    doc = fitz.open(stream=data, filetype="pdf")
+    try:
+        n = min(doc.page_count, max_pages)
+        if doc.page_count > max_pages:
+            logger.info(
+                "OCR: %s de %s págs. (aumenta PDF_OCR_MAX_PAGES o divide el PDF si falta el final).",
+                n,
+                doc.page_count,
+            )
+        parts: list[str] = []
+        for i in range(n):
+            if i > 0 and i % 20 == 0:
+                logger.info("OCR: van %s / %s págs.", i + 1, n)
+            page = doc.load_page(i)
+            t = _ocr_one_page_pytesseract(page, dpi=dpi, lang=lang)
+            if t:
+                parts.append(f"--- Página {i + 1} ---\n\n{t}")
+        return "\n\n".join(parts)
+    finally:
+        doc.close()
+
+
+def load_document_bytes(
+    filename: str,
+    data: bytes,
+    *,
+    find_tables_max_pages: int = 0,
+    pdf_ocr_enabled: bool = True,
+    pdf_ocr_max_pages: int = 0,
+    pdf_ocr_trigger_total_text: int = 800,
+    pdf_ocr_dpi: int = 120,
+    pdf_ocr_lang: str = "spa+eng",
+) -> str:
+    """``find_tables_max_pages``: PyMuPDF; 0=sin límite. ``pdf_ocr_*``: barrido Tesseract si el nativo aporta poco texto."""
     suffix = Path(filename).suffix.lower()  # extensión para elegir extractor
     if suffix in {".txt", ".md", ".markdown"}:
         return clean_text(data.decode("utf-8", errors="replace"))  # UTF-8; bytes inválidos → carácter sustituto
@@ -361,7 +449,30 @@ def load_document_bytes(
             raw = _pdf_text_pypdf(data)  # PyMuPDF devolvió vacío: probar respaldo
         normalized = _normalize_pdf_stream_junk(raw)  # limpiar operadores residuales
         cleaned = clean_text(_reduce_pdf_drawing_artifacts(normalized))  # quitar basura visual y normalizar
+        if (
+            pdf_ocr_enabled
+            and pdf_ocr_max_pages > 0
+            and len(cleaned.strip()) < pdf_ocr_trigger_total_text
+        ):
+            ocr_raw = _pdf_ocr_sweep(
+                data,
+                max_pages=pdf_ocr_max_pages,
+                dpi=pdf_ocr_dpi,
+                lang=pdf_ocr_lang,
+            )
+            if len(ocr_raw.strip()) > len(cleaned.strip()):
+                logger.info(
+                    "OCR sustituye extracción nativa (%s → %s caracteres aprox).",
+                    len(cleaned.strip()),
+                    len(ocr_raw.strip()),
+                )
+                raw = ocr_raw
+                normalized = _normalize_pdf_stream_junk(raw)
+                cleaned = clean_text(_reduce_pdf_drawing_artifacts(normalized))
         if not cleaned.strip():
-            raise ValueError("El PDF no devolvió texto legible tras la extracción.")
+            raise ValueError(
+                "El PDF no devolvió texto legible (capa de texto escasa y OCR sin resultados: "
+                "compruebe tesseract y datos spa+eng, o un PDF con solo imagen y sin motor OCR)."
+            )
         return cleaned
     raise ValueError(f"Formato no soportado: {suffix}. Use .txt, .md o .pdf.")

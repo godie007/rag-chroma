@@ -180,6 +180,11 @@ export type ConfigPublic = {
   rag_clarification_max_rounds: number
   rag_clarify_semantic_expand: boolean
   pdf_ingest_find_tables_max_pages: number
+  pdf_ocr_enabled: boolean
+  pdf_ocr_max_pages: number
+  pdf_ocr_trigger_total_text: number
+  pdf_ocr_dpi: number
+  pdf_ocr_lang: string
   parent_rerank_enabled: boolean
   rag_retriever_k: number
   rag_reranker_top_n: number

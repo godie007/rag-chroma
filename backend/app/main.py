@@ -271,6 +271,11 @@ class ConfigPublic(BaseModel):
     rag_clarification_max_rounds: int
     rag_clarify_semantic_expand: bool
     pdf_ingest_find_tables_max_pages: int
+    pdf_ocr_enabled: bool
+    pdf_ocr_max_pages: int
+    pdf_ocr_trigger_total_text: int
+    pdf_ocr_dpi: int
+    pdf_ocr_lang: str
     parent_rerank_enabled: bool
     rag_retriever_k: int
     rag_reranker_top_n: int
@@ -403,6 +408,11 @@ def public_config():
         rag_clarification_max_rounds=s.rag_clarification_max_rounds,
         rag_clarify_semantic_expand=s.rag_clarify_semantic_expand,
         pdf_ingest_find_tables_max_pages=s.pdf_ingest_find_tables_max_pages,
+        pdf_ocr_enabled=s.pdf_ocr_enabled,
+        pdf_ocr_max_pages=s.pdf_ocr_max_pages,
+        pdf_ocr_trigger_total_text=s.pdf_ocr_trigger_total_text,
+        pdf_ocr_dpi=s.pdf_ocr_dpi,
+        pdf_ocr_lang=s.pdf_ocr_lang,
         parent_rerank_enabled=s.parent_rerank_enabled,
         rag_retriever_k=s.rag_retriever_k,
         rag_reranker_top_n=s.rag_reranker_top_n,
@@ -476,6 +486,11 @@ async def ingest(files: list[UploadFile] = File(...)):
                 upload.filename or "unknown",
                 raw,
                 find_tables_max_pages=settings.pdf_ingest_find_tables_max_pages,
+                pdf_ocr_enabled=settings.pdf_ocr_enabled,
+                pdf_ocr_max_pages=settings.pdf_ocr_max_pages,
+                pdf_ocr_trigger_total_text=settings.pdf_ocr_trigger_total_text,
+                pdf_ocr_dpi=settings.pdf_ocr_dpi,
+                pdf_ocr_lang=settings.pdf_ocr_lang,
             )
         except ValueError as e:
             messages.append(f"Omitido {upload.filename}: {e}")
@@ -509,9 +524,10 @@ async def ingest(files: list[UploadFile] = File(...)):
         if n == 0 and (text or "").strip():
             messages.append(
                 f"{upload.filename}: 0 fragmentos (texto extraído {len(text):,} car.). "
-                "Posible PDF imagen (OCR), o umbral de trozos: revisa log del backend y CHUNK_MIN_CHARS; "
-                "o ajusta PDF_INGEST_FIND_TABLES_MAX_PAGES (0=todas las págs con find_tables; 300-500 en PDFs enormes; "
-                f"ahora: {settings.pdf_ingest_find_tables_max_pages or '0 (sin límite)'})."
+                "Revisa CHUNK_MIN_CHARS, Tesseract en PATH (brew install tesseract tesseract-lang), PDF_OCR_*; "
+                "o PDF_INGEST_FIND_TABLES_MAX_PAGES (ahora find_tables: "
+                f"{settings.pdf_ingest_find_tables_max_pages or '0 (sin límite)'}; "
+                f"OCR max págs: {settings.pdf_ocr_max_pages}, activo: {settings.pdf_ocr_enabled})."
             )
         else:
             messages.append(f"{upload.filename}: {n} fragmentos indexados")

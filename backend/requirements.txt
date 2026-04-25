@@ -66,7 +66,9 @@ pydantic-settings==2.13.1
 pydantic_core==2.41.5
 Pygments==2.20.0
 pypdf==6.9.2
+Pillow==11.0.0
 PyMuPDF==1.27.2.2
+pytesseract==0.3.13
 PyPika==0.51.1
 pyproject_hooks==1.2.0
 python-dateutil==2.9.0.post0

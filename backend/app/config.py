@@ -39,6 +39,22 @@ class Settings(BaseSettings):
         le=50_000,
         description="0=todas las págs con find_tables; N>0=limita tablas a pág. 1..N (recom. 300–500 en PDFs enormes).",
     )
+    # PDF escaneado (casi sin texto en capa): OCR con Tesseract, solo si el nativo aporta poco. Requiere tesseract en SO.
+    pdf_ocr_enabled: bool = True
+    pdf_ocr_max_pages: int = Field(
+        120,
+        ge=0,
+        le=2000,
+        description="0=sin OCR. N=máx. págs. a rasterizar+OCR en un solo ingest (normas 600+ pág.: sube N o divide el PDF).",
+    )
+    pdf_ocr_trigger_total_text: int = Field(
+        800,
+        ge=0,
+        le=1_000_000,
+        description="Si el texto *tras limpiar* (sin OCR) es más corto que esto, se intenta barrido OCR.",
+    )
+    pdf_ocr_dpi: int = Field(120, ge=72, le=200, description="DPI de render: 100–150 suele ser óptimo velocidad/legibilidad.")
+    pdf_ocr_lang: str = "spa+eng"
     top_k: int = 8
     use_mmr: bool = True
     mmr_fetch_k: int = 60
