@@ -2,6 +2,115 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── OKLCH Design Token System ──────────────────────────────────── */
+:root {
+  --bg:            oklch(8% 0.018 265);
+  --surface:       oklch(10% 0.018 265);
+  --surface-up:    oklch(14% 0.018 265);
+  --fg:            oklch(91% 0.012 265);
+  --fg-muted:      oklch(58% 0.012 265);
+  --fg-dim:        oklch(36% 0.010 265);
+  --primary:       oklch(70% 0.22 285);
+  --primary-up:    oklch(76% 0.22 285);
+  --primary-glow:  oklch(70% 0.22 285 / 0.30);
+  --ok:            oklch(74% 0.18 155);
+  --warn:          oklch(78% 0.19 68);
+  --err:           oklch(65% 0.22 25);
+  --border:        oklch(20% 0.020 265);
+  --border-faint:  oklch(14% 0.015 265);
+
+  /* Motion */
+  --ease-out:    cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-expo:   cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast:  150ms;
+  --dur-base:  250ms;
+  --dur-slow:  500ms;
+}
+
+/* ── LIQUID GLASS ─────────────────────────────────────────────── */
+.liquid-glass {
+  background: linear-gradient(
+    135deg,
+    oklch(100% 0 0 / 0.055) 0%,
+    oklch(100% 0 0 / 0.018) 100%
+  );
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid oklch(100% 0 0 / 0.07);
+  box-shadow:
+    inset 0 1px 0 oklch(100% 0 0 / 0.08),
+    0 8px 32px oklch(0% 0 0 / 0.45);
+}
+.liquid-glass-hover {
+  transition: border-color var(--dur-base) var(--ease-out),
+              box-shadow var(--dur-base) var(--ease-out);
+}
+.liquid-glass-hover:hover {
+  border-color: oklch(100% 0 0 / 0.11);
+  box-shadow:
+    inset 0 1px 0 oklch(100% 0 0 / 0.12),
+    0 12px 40px oklch(0% 0 0 / 0.50);
+}
+
+/* ── GLOW ─────────────────────────────────────────────────────── */
+.glow-primary {
+  box-shadow:
+    0 0 0 1px oklch(70% 0.22 285 / 0.35),
+    0 0 24px oklch(70% 0.22 285 / 0.25),
+    0 4px 12px oklch(0% 0 0 / 0.40);
+}
+
+/* ── SCROLL-DRIVEN ANIMATIONS (native CSS) ────────────────────── */
+@supports (animation-timeline: scroll()) {
+  .reveal {
+    animation: fade-up linear both;
+    animation-timeline: view();
+    animation-range: entry 0% cover 30%;
+  }
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse-dot {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
+  40%           { transform: scale(1.0); opacity: 1.0; }
+}
+
+/* ── @STARTING-STYLE — flash-free modal enters ────────────────── */
+.modal-enter {
+  opacity: 1;
+  transform: scale(1) translateY(0);
+  transition:
+    opacity var(--dur-base) var(--ease-out),
+    transform var(--dur-base) var(--ease-spring);
+}
+@starting-style {
+  .modal-enter {
+    opacity: 0;
+    transform: scale(0.95) translateY(8px);
+  }
+}
+
+/* ── TYPOGRAPHY ───────────────────────────────────────────────── */
 .material-symbols-outlined {
   font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
   vertical-align: middle;
@@ -10,36 +119,69 @@
 body {
   margin: 0;
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-h1,
-h2,
-h3 {
+h1, h2, h3 {
   font-family: Manrope, ui-sans-serif, system-ui, sans-serif;
 }
 
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #d9e4ea;
+/* ── SCROLLBARS ───────────────────────────────────────────────── */
+::-webkit-scrollbar        { width: 5px; height: 5px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  {
+  background: oklch(28% 0.01 265);
   border-radius: 10px;
 }
+::-webkit-scrollbar-thumb:hover { background: oklch(38% 0.01 265); }
 
-::-webkit-scrollbar-thumb:hover {
-  background: #a9b4b9;
-}
+.no-scrollbar::-webkit-scrollbar { display: none; }
 
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-
+/* ── MARKDOWN ─────────────────────────────────────────────────── */
 .md-inline-code {
-  @apply rounded px-1 py-0.5 text-[0.9em] bg-surface-container-low text-on-surface font-mono;
+  @apply rounded-sm px-1.5 py-0.5 text-[0.88em] bg-surface-container text-primary font-mono;
+}
+
+/* ── PROSE overrides for dark theme ──────────────────────────── */
+.prose {
+  --tw-prose-body: theme('colors.on-surface');
+  --tw-prose-headings: theme('colors.on-surface');
+  --tw-prose-bold: theme('colors.on-surface');
+  --tw-prose-links: theme('colors.primary');
+  --tw-prose-code: theme('colors.primary');
+  --tw-prose-quotes: theme('colors.on-surface-variant');
+  --tw-prose-captions: theme('colors.on-surface-variant');
+  --tw-prose-counters: theme('colors.on-surface-variant');
+  --tw-prose-bullets: theme('colors.on-surface-variant');
+  --tw-prose-hr: theme('colors.outline');
+  --tw-prose-th-borders: theme('colors.outline');
+  --tw-prose-td-borders: theme('colors.outline-variant');
+}
+
+/* ── FOCUS RINGS ──────────────────────────────────────────────── */
+[data-focus-ring]:focus-visible,
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid oklch(70% 0.22 285 / 0.60);
+  outline-offset: 2px;
+}
+
+/* ── PROGRESS BAR (scroll-driven) ─────────────────────────────── */
+.reading-progress {
+  position: fixed;
+  top: 0; left: 0;
+  width: 0%;
+  height: 2px;
+  background: linear-gradient(90deg, var(--primary), oklch(from var(--primary) l c calc(h + 30)));
+  animation: grow-width linear forwards;
+  animation-timeline: scroll(root block);
+  z-index: 100;
+}
+@keyframes grow-width {
+  from { width: 0%; }
+  to   { width: 100%; }
 }

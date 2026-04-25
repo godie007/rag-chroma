@@ -441,7 +441,7 @@ export function DocumentsView({
   const chunkCountLabel = statsLoading ? '…' : String(chunkCount)
 
   return (
-    <main className="p-6 md:p-8 min-h-screen bg-surface">
+    <main className="p-6 md:p-8 min-h-screen bg-background">
       <input
         ref={inputRef}
         type="file"
@@ -453,21 +453,21 @@ export function DocumentsView({
 
       <div className="mb-10 flex flex-col gap-4 md:flex-row md:justify-between md:items-end">
         <div>
-          <h1 className="text-3xl md:text-4xl font-extrabold tracking-tighter text-on-background mb-1 font-headline">
+          <h1 className="text-3xl md:text-4xl font-extrabold tracking-[-0.03em] text-on-surface mb-1.5 font-headline">
             RAG · Conocimiento interno
           </h1>
-          <p className="text-on-surface-variant font-medium text-sm md:text-base">
+          <p className="text-on-surface-variant text-sm md:text-base">
             Gestión de documentos y optimización de fragmentación semántica.
           </p>
         </div>
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-2.5">
           <button
             type="button"
             onClick={() => inputRef.current?.click()}
             disabled={ingestLoading || resetLoading}
-            className="px-5 md:px-6 py-2.5 bg-surface-container-high text-on-surface-variant rounded-md font-bold text-sm hover:bg-surface-container-highest transition-colors flex items-center gap-2 outline outline-1 outline-outline-variant/15 disabled:opacity-50"
+            className="px-5 md:px-6 py-2.5 bg-surface-container-low text-on-surface-variant rounded-lg font-semibold text-sm hover:bg-surface-container hover:text-on-surface transition-all border border-outline/50 flex items-center gap-2 disabled:opacity-50"
           >
-            <Icon name="sync" className="text-sm" />
+            <Icon name="upload_file" className="text-base" />
             Añadir archivos
           </button>
           <button
@@ -477,35 +477,38 @@ export function DocumentsView({
               setShowEmptyModal(true)
             }}
             disabled={resetLoading || ingestLoading}
-            className="px-5 md:px-6 py-2.5 bg-error text-on-error rounded-md font-bold text-sm hover:opacity-90 transition-opacity flex items-center gap-2 disabled:opacity-50"
+            className="px-5 md:px-6 py-2.5 bg-error-container/30 text-error rounded-lg font-semibold text-sm hover:bg-error-container/50 transition-all border border-error/20 flex items-center gap-2 disabled:opacity-50"
           >
-            <Icon name="delete_forever" className="text-sm" />
+            <Icon name="delete_forever" className="text-base" />
             Vaciar índice
           </button>
         </div>
       </div>
 
       {ingestHint && (
-        <div className="mb-4 rounded-xl border border-tertiary/30 bg-tertiary-container/20 px-4 py-3 text-sm text-on-tertiary-container">
+        <div className="mb-4 rounded-xl border border-tertiary/25 bg-tertiary-container/15 px-4 py-3 text-sm text-on-tertiary-container flex gap-2.5 items-start">
+          <Icon name="info" className="text-tertiary text-base shrink-0 mt-0.5" />
           {ingestHint}
         </div>
       )}
 
       {ingestDoneMessage && (
-        <div className="mb-6 rounded-xl border border-secondary/40 bg-secondary-container/20 px-4 py-3 text-sm text-on-secondary-container font-medium">
+        <div className="mb-6 rounded-xl border border-secondary/25 bg-secondary-container/15 px-4 py-3 text-sm text-on-secondary-container font-medium flex gap-2.5 items-start">
+          <Icon name="check_circle" className="text-secondary text-base shrink-0 mt-0.5" filled />
           {ingestDoneMessage}
         </div>
       )}
 
       {error && (
-        <div className="mb-6 rounded-xl border border-error/30 bg-error-container/20 px-4 py-3 text-sm text-on-error-container">
+        <div className="mb-6 rounded-xl border border-error/25 bg-error-container/15 px-4 py-3 text-sm text-on-error-container flex gap-2.5 items-start">
+          <Icon name="error" className="text-error text-base shrink-0 mt-0.5" filled />
           {error}
         </div>
       )}
 
       <div className="grid grid-cols-12 gap-6 md:gap-8">
         <div className="col-span-12 lg:col-span-4">
-          <div className="bg-surface-container-low p-6 md:p-8 rounded-xl">
+          <div className="bg-surface-container-low p-6 md:p-8 rounded-xl border border-outline/40">
             <h3 className="text-xs font-bold uppercase tracking-widest text-on-surface-variant mb-2">
               Parámetros de recuperación
             </h3>
@@ -628,7 +631,7 @@ export function DocumentsView({
         </div>
 
         <div className="col-span-12 lg:col-span-8">
-          <div className="bg-surface-container-lowest p-1 rounded-xl shadow-sm min-h-[420px] flex flex-col">
+          <div className="bg-surface-container-lowest p-1 rounded-xl border border-outline/40 min-h-[420px] flex flex-col">
             {(ingestLoading || ingestProgress > 0) && (
               <div
                 ref={ingestStatusAnchorRef}
@@ -680,19 +683,19 @@ export function DocumentsView({
                 e.stopPropagation()
               }}
               onDrop={onDrop}
-              className="m-2 p-10 md:p-12 border-2 border-dashed border-outline-variant/30 rounded-xl bg-surface-container-low flex flex-col items-center justify-center text-center group cursor-pointer hover:bg-surface-container-high transition-colors"
+              className="m-2 p-10 md:p-12 border-2 border-dashed border-outline/30 rounded-xl bg-surface-container-low flex flex-col items-center justify-center text-center group cursor-pointer hover:bg-surface-container hover:border-primary/30 transition-all"
             >
-              <div className="w-16 h-16 rounded-full bg-white shadow-sm flex items-center justify-center text-primary mb-4 group-hover:scale-110 transition-transform">
-                <Icon name="cloud_upload" className="text-3xl" />
+              <div className="w-14 h-14 rounded-2xl bg-surface-container border border-outline/60 flex items-center justify-center text-primary mb-4 group-hover:scale-110 group-hover:border-primary/40 transition-all">
+                <Icon name="cloud_upload" className="text-2xl" />
               </div>
-              <h4 className="font-bold text-on-surface">Arrastra nuevos documentos</h4>
-              <p className="text-sm text-on-surface-variant mt-1">
+              <h4 className="font-semibold text-on-surface text-sm">Arrastra nuevos documentos</h4>
+              <p className="text-xs text-on-surface-variant mt-1">
                 PDF, TXT o Markdown hasta {maxLabel} cada uno.
               </p>
             </button>
 
             <div className="px-4 md:px-8 pb-4 flex flex-col gap-4">
-              <div className="rounded-xl border border-outline-variant/20 bg-surface-container-low px-4 py-3">
+              <div className="rounded-xl border border-outline/40 bg-surface-container px-4 py-3">
                 <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                   <div className="flex flex-wrap items-center gap-2 min-w-0">
                     <h3 className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant shrink-0">
@@ -708,7 +711,7 @@ export function DocumentsView({
                     type="button"
                     onClick={() => void loadIndexedSources()}
                     disabled={sourcesLoading || ingestLoading}
-                    className="text-[10px] font-bold uppercase tracking-wide text-primary hover:underline disabled:opacity-50"
+                    className="text-[10px] font-semibold uppercase tracking-wide text-primary/80 hover:text-primary transition-colors disabled:opacity-50"
                   >
                     {sourcesLoading ? 'Actualizando…' : 'Actualizar'}
                   </button>
@@ -781,7 +784,7 @@ export function DocumentsView({
                     type="button"
                     onClick={() => void onIngestQueue()}
                     disabled={ingestLoading || !queue.some((q) => q.status === 'pending')}
-                    className="px-4 py-2 bg-primary text-on-primary rounded-md text-xs font-bold hover:bg-primary-dim disabled:opacity-50"
+                    className="px-4 py-2 bg-primary text-on-primary rounded-lg text-xs font-semibold hover:bg-primary-dim glow-primary transition-all disabled:opacity-50 disabled:shadow-none"
                   >
                     {ingestLoading ? 'Indexando…' : 'Indexar cola'}
                   </button>
@@ -804,24 +807,24 @@ export function DocumentsView({
                   {queue.map((item) => (
                     <div
                       key={item.id}
-                      className={`flex items-center p-4 bg-surface rounded-xl hover:shadow-md transition-shadow relative ${
+                      className={`flex items-center p-3.5 bg-surface-container-low border border-outline/40 rounded-xl hover:border-outline/60 transition-all relative ${
                         item.status === 'indexed' || item.status === 'duplicate' ? 'pl-3' : ''
                       }`}
                     >
                       {item.status === 'indexed' && (
-                        <div className="absolute left-0 top-1/4 bottom-1/4 w-1 bg-secondary rounded-full" />
+                        <div className="absolute left-0 top-1/4 bottom-1/4 w-[3px] bg-secondary rounded-full" />
                       )}
                       {item.status === 'duplicate' && (
-                        <div className="absolute left-0 top-1/4 bottom-1/4 w-1 bg-tertiary rounded-full" />
+                        <div className="absolute left-0 top-1/4 bottom-1/4 w-[3px] bg-tertiary rounded-full" />
                       )}
-                      <div className="flex items-center gap-4 min-w-0 flex-1">
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
                         <div
-                          className={`w-10 h-10 rounded-lg bg-white flex items-center justify-center shrink-0 ${
+                          className={`w-9 h-9 rounded-lg bg-surface-container border border-outline/50 flex items-center justify-center shrink-0 ${
                             item.status === 'indexed'
                               ? 'text-secondary'
                               : item.status === 'duplicate'
                                 ? 'text-tertiary'
-                                : 'text-slate-400'
+                                : 'text-on-surface-variant'
                           }`}
                         >
                           <Icon
@@ -857,13 +860,13 @@ export function DocumentsView({
       </div>
 
       {sourcePendingDelete && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-700">
+        <div className="fixed inset-0 bg-black/65 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="modal-enter bg-surface-container-low w-full max-w-md rounded-2xl overflow-hidden border border-outline/60 shadow-[0_24px_80px_oklch(0%_0_0/0.7)]">
             <div className="p-8 text-center">
-              <div className="w-16 h-16 bg-error-container/40 rounded-full flex items-center justify-center text-error mx-auto mb-4">
-                <Icon name="delete_forever" className="text-3xl" />
+              <div className="w-14 h-14 bg-error-container/30 rounded-2xl border border-error/20 flex items-center justify-center text-error mx-auto mb-5">
+                <Icon name="delete_forever" className="text-2xl" />
               </div>
-              <h2 className="text-xl font-extrabold text-on-surface tracking-tight mb-2 font-headline">
+              <h2 className="text-xl font-bold text-on-surface tracking-tight mb-2 font-headline">
                 ¿Quitar esta fuente del índice?
               </h2>
               <p className="text-on-surface-variant text-sm leading-relaxed mb-2 break-all px-1">
@@ -874,16 +877,16 @@ export function DocumentsView({
                 acción no borra el archivo en tu disco, solo el índice vectorial.
               </p>
               {deleteSourceError && (
-                <p className="text-left text-sm text-error font-medium mb-4 rounded-lg border border-error/30 bg-error-container/15 px-3 py-2">
+                <p className="text-left text-sm text-error font-medium mb-4 rounded-lg border border-error/25 bg-error-container/20 px-3 py-2">
                   {deleteSourceError}
                 </p>
               )}
-              <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-2.5">
                 <button
                   type="button"
                   onClick={() => void onConfirmDeleteSource()}
                   disabled={deleteSourceLoading}
-                  className="w-full py-3 bg-error text-white rounded-xl font-bold hover:opacity-90 transition-all active:scale-[0.98] disabled:opacity-50"
+                  className="w-full py-3 bg-error/90 text-on-error rounded-xl font-semibold hover:bg-error transition-all active:scale-[0.98] disabled:opacity-50"
                 >
                   {deleteSourceLoading ? 'Eliminando…' : 'Sí, quitar del índice'}
                 </button>
@@ -894,7 +897,7 @@ export function DocumentsView({
                     setDeleteSourceError(null)
                     setSourcePendingDelete(null)
                   }}
-                  className="w-full py-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-xl font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition-all active:scale-[0.98] disabled:opacity-50"
+                  className="w-full py-3 bg-surface-container text-on-surface-variant rounded-xl font-semibold hover:bg-surface-container-high hover:text-on-surface transition-all active:scale-[0.98] disabled:opacity-50"
                 >
                   Cancelar
                 </button>
@@ -905,31 +908,31 @@ export function DocumentsView({
       )}
 
       {showEmptyModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-700">
+        <div className="fixed inset-0 bg-black/65 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="modal-enter bg-surface-container-low w-full max-w-md rounded-2xl overflow-hidden border border-outline/60 shadow-[0_24px_80px_oklch(0%_0_0/0.7)]">
             <div className="p-8 text-center">
-              <div className="w-20 h-20 bg-error-container rounded-full flex items-center justify-center text-on-error-container mx-auto mb-6">
-                <Icon name="warning" className="text-4xl" />
+              <div className="w-16 h-16 bg-error-container/30 rounded-2xl border border-error/20 flex items-center justify-center text-error mx-auto mb-5">
+                <Icon name="warning" className="text-3xl" />
               </div>
-              <h2 className="text-2xl font-extrabold text-on-surface tracking-tight mb-2 font-headline">
+              <h2 className="text-2xl font-bold text-on-surface tracking-tight mb-2 font-headline">
                 ¿Vaciar el índice?
               </h2>
               <p className="text-on-surface-variant text-sm leading-relaxed mb-8">
-                Esta acción es irreversible.                 Se borran los{' '}
-                <span className="font-bold text-on-surface">{chunkCountLabel} chunks</span> y los archivos físicos de la
+                Esta acción es irreversible. Se borran los{' '}
+                <span className="font-semibold text-on-surface">{chunkCountLabel} chunks</span> y los archivos físicos de la
                 base Chroma en disco; no quedará índice hasta que vuelvas a ingerir documentos.
               </p>
               {resetModalError && (
-                <p className="text-left text-sm text-error font-medium mb-4 rounded-lg border border-error/30 bg-error-container/15 px-3 py-2">
+                <p className="text-left text-sm text-error font-medium mb-4 rounded-lg border border-error/25 bg-error-container/20 px-3 py-2">
                   {resetModalError}
                 </p>
               )}
-              <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-2.5">
                 <button
                   type="button"
                   onClick={() => void onConfirmEmpty()}
                   disabled={resetLoading}
-                  className="w-full py-3 bg-error text-white rounded-xl font-bold hover:opacity-90 transition-all active:scale-[0.98] disabled:opacity-50"
+                  className="w-full py-3 bg-error/90 text-on-error rounded-xl font-semibold hover:bg-error transition-all active:scale-[0.98] disabled:opacity-50"
                 >
                   {resetLoading ? '…' : 'Sí, eliminar todo el contenido'}
                 </button>
@@ -940,7 +943,7 @@ export function DocumentsView({
                     setResetModalError(null)
                     setShowEmptyModal(false)
                   }}
-                  className="w-full py-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-xl font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition-all active:scale-[0.98] disabled:opacity-50"
+                  className="w-full py-3 bg-surface-container text-on-surface-variant rounded-xl font-semibold hover:bg-surface-container-high hover:text-on-surface transition-all active:scale-[0.98] disabled:opacity-50"
                 >
                   No, mantener mis datos
                 </button>

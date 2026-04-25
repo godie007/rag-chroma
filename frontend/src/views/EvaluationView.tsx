@@ -106,7 +106,7 @@ export function EvaluationView({
   const keys = evalResult?.ragas_metric_keys ?? []
 
   return (
-    <main className="flex-1 ml-0 p-6 md:p-8 bg-surface min-h-screen">
+    <main className="flex-1 ml-0 p-6 md:p-8 bg-background min-h-screen">
       <div className="mb-10">
         <h1 className="font-headline text-3xl md:text-4xl font-extrabold tracking-tight text-on-surface mb-2">
           Evaluación RAGAS
@@ -121,8 +121,8 @@ export function EvaluationView({
 
       <div className="grid grid-cols-12 gap-6 md:gap-8">
         <div className="col-span-12 lg:col-span-4 space-y-6">
-          <section className="bg-surface-container-lowest p-6 rounded-xl shadow-sm">
-            <h3 className="font-headline text-lg font-bold mb-4 flex items-center gap-2">
+          <section className="bg-surface-container-low p-6 rounded-xl border border-outline/40">
+            <h3 className="font-headline text-lg font-bold mb-4 flex items-center gap-2 text-on-surface">
               <Icon name="settings_input_component" className="text-primary" />
               Configuración
             </h3>
@@ -132,7 +132,7 @@ export function EvaluationView({
                   Archivo de evaluación
                 </label>
                 <select
-                  className="w-full min-w-0 bg-surface-container-low border-none rounded-lg text-sm focus:ring-2 focus:ring-primary py-2.5"
+                  className="w-full min-w-0 bg-surface-container border border-outline/50 text-on-surface rounded-lg text-sm focus:ring-2 focus:ring-primary/40 py-2.5 px-3"
                   value={preset}
                   onChange={(e) => setPreset(e.target.value)}
                   disabled={evalLoading}
@@ -153,7 +153,7 @@ export function EvaluationView({
                   Ruta manual (relativa a pruebaScanntech/)
                 </label>
                 <input
-                  className="w-full bg-surface-container-low border-none rounded-lg text-sm focus:ring-2 focus:ring-primary py-2.5"
+                  className="w-full bg-surface-container border border-outline/50 text-on-surface rounded-lg text-sm focus:ring-2 focus:ring-primary/40 py-2.5 px-3"
                   placeholder="evals/sample_eval.jsonl"
                   type="text"
                   value={manualPath}
@@ -182,8 +182,8 @@ export function EvaluationView({
             </div>
           </section>
 
-          <section className="bg-surface-container-lowest p-6 rounded-xl shadow-sm">
-            <h3 className="font-headline text-lg font-bold mb-4">Exportar resultados</h3>
+          <section className="bg-surface-container-low p-6 rounded-xl border border-outline/40">
+            <h3 className="font-headline text-lg font-bold mb-4 text-on-surface">Exportar resultados</h3>
             <p className="text-sm text-on-surface-variant mb-4">
               Descarga el JSON completo de la última evaluación para análisis externo o CI/CD.
             </p>
@@ -215,7 +215,7 @@ export function EvaluationView({
                 return (
                   <div
                     key={k}
-                    className={`bg-surface-container-lowest p-4 md:p-5 rounded-xl shadow-sm border-l-4 ${border}`}
+                    className={`bg-surface-container-low p-4 md:p-5 rounded-xl border border-outline/40 border-l-4 ${border}`}
                   >
                     <span className="text-[10px] md:text-xs font-bold text-on-surface-variant uppercase line-clamp-2">
                       {evalResult.metric_labels_es[k] ?? k}
@@ -234,7 +234,7 @@ export function EvaluationView({
 
           {evalResult && (
             <>
-              <div className="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden">
+              <div className="bg-surface-container-low rounded-xl border border-outline/40 overflow-hidden">
                 <div className="px-6 py-4 border-b border-outline-variant/10 flex justify-between items-center bg-surface-container-low/50 flex-wrap gap-2">
                   <h3 className="font-headline font-bold">Detalle por pregunta</h3>
                   <span className="text-xs font-bold bg-primary-container text-on-primary-container px-2.5 py-1 rounded-full uppercase">
@@ -288,18 +288,19 @@ export function EvaluationView({
                 </div>
               </div>
 
-              <div className="bg-slate-900 text-white p-6 md:p-8 rounded-2xl relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-64 h-64 bg-primary/20 blur-[100px] rounded-full -translate-y-1/2 translate-x-1/2 pointer-events-none" />
+              <div className="bg-surface-container-high border border-outline/50 text-on-surface p-6 md:p-8 rounded-2xl relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-72 h-72 bg-primary/10 blur-[120px] rounded-full -translate-y-1/2 translate-x-1/2 pointer-events-none" />
+                <div className="absolute bottom-0 left-0 w-48 h-48 bg-secondary/8 blur-[80px] rounded-full translate-y-1/2 -translate-x-1/2 pointer-events-none" />
                 <div className="relative z-10">
-                  <h4 className="font-headline text-xl font-bold mb-4">Resumen</h4>
-                  <p className="text-slate-300 leading-relaxed mb-6 text-sm whitespace-pre-wrap">
+                  <h4 className="font-headline text-xl font-bold mb-4 text-on-surface">Resumen</h4>
+                  <p className="text-on-surface-variant leading-relaxed mb-6 text-sm whitespace-pre-wrap">
                     {buildInsight(evalResult)}
                   </p>
                   {onGoDocuments && (
                     <button
                       type="button"
                       onClick={() => onGoDocuments()}
-                      className="bg-white/10 hover:bg-white/20 px-4 py-2 rounded-lg text-sm font-bold transition-all backdrop-blur-md"
+                      className="bg-surface-container text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface border border-outline/50 px-4 py-2 rounded-lg text-sm font-semibold transition-all"
                     >
                       Ir a documentos
                     </button>

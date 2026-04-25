@@ -10,7 +10,7 @@ export function ConfigurationsView({
   statsLoading?: boolean
 }) {
   return (
-    <main className="flex-1 ml-0 p-6 md:p-8 bg-surface min-h-screen">
+    <main className="flex-1 ml-0 p-6 md:p-8 bg-background min-h-screen">
       <div className="mb-8 max-w-4xl">
         <h1 className="font-headline text-3xl md:text-4xl font-extrabold tracking-tight text-on-surface mb-2">
           Configuraciones

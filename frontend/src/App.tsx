@@ -13,8 +13,37 @@ import { EvaluationView } from './views/EvaluationView'
 import { ConfigurationsView } from './views/ConfigurationsView'
 import { WhatsAppSettingsView } from './views/WhatsAppSettingsView'
 
+const VIEW_TO_PATH: Record<AppView, string> = {
+  documents: '/documents',
+  chat: '/chat',
+  evaluation: '/evaluation',
+  whatsapp: '/whatsapp',
+  settings: '/settings',
+}
+
+function pathToView(pathname: string): AppView {
+  const clean = (pathname || '/').replace(/\/+$/, '') || '/'
+  switch (clean) {
+    case '/':
+    case '/documents':
+      return 'documents'
+    case '/chat':
+      return 'chat'
+    case '/evaluation':
+      return 'evaluation'
+    case '/whatsapp':
+      return 'whatsapp'
+    case '/settings':
+      return 'settings'
+    default:
+      return 'documents'
+  }
+}
+
 function App() {
-  const [view, setView] = useState<AppView>('documents')
+  const [view, setViewState] = useState<AppView>(() =>
+    typeof window === 'undefined' ? 'documents' : pathToView(window.location.pathname),
+  )
   const [stats, setStats] = useState<StatsResponse | null>(null)
   /** Hasta el primer GET /stats terminado no mostrar "0 fragmentos" como si fuera el total real. */
   /** Solo true hasta el primer GET /stats (éxito o error), para no mostrar 0 al recargar. Refrescos posteriores no enmascaran el total. */
@@ -69,6 +98,24 @@ function App() {
   }, [refreshStats])
 
   useEffect(() => {
+    const onPopState = () => {
+      setViewState(pathToView(window.location.pathname))
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+
+  const setView = useCallback((next: AppView) => {
+    setViewState(next)
+    if (typeof window === 'undefined') return
+    const targetPath = VIEW_TO_PATH[next] ?? '/documents'
+    const currentPath = window.location.pathname || '/'
+    if (currentPath !== targetPath) {
+      window.history.pushState({ view: next }, '', targetPath)
+    }
+  }, [])
+
+  useEffect(() => {
     const onPageShow = (e: PageTransitionEvent) => {
       if (e.persisted) void refreshStats()
     }
@@ -97,7 +144,8 @@ function App() {
   return (
     <AppShell view={view} setView={setView} stats={stats} statsLoading={statsLoading}>
       {banner && (
-        <div className="mx-4 md:mx-8 mt-4 rounded-lg border border-tertiary/40 bg-tertiary-container/15 px-4 py-2 text-sm text-on-tertiary-container shrink-0">
+        <div className="mx-4 md:mx-8 mt-4 rounded-lg border border-tertiary/30 bg-tertiary-container/10 px-4 py-2.5 text-sm text-on-tertiary-container flex items-center gap-2.5 shrink-0">
+          <span className="w-1.5 h-1.5 rounded-full bg-tertiary shrink-0" />
           {banner}
         </div>
       )}

@@ -27,7 +27,13 @@ export function IndexFragmentBadge({
       className={`inline-flex items-center gap-2 text-xs font-semibold text-on-surface ${className}`.trim()}
       title={stats?.collection ? `${n} fragmentos · ${stats.collection}` : `${n} fragmentos`}
     >
-      <span className={`w-2 h-2 rounded-full shrink-0 ${ready ? 'bg-secondary' : 'bg-error'}`} />
+      <span
+        className={`w-2 h-2 rounded-full shrink-0 ${
+          ready
+            ? 'bg-secondary shadow-[0_0_6px_theme(colors.secondary/0.5)]'
+            : 'bg-error shadow-[0_0_6px_theme(colors.error/0.4)]'
+        }`}
+      />
       <span>
         {n} fragmento{n === 1 ? '' : 's'} en el índice
       </span>
