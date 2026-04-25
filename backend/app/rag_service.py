@@ -744,9 +744,13 @@ class RAGService:
             parts.append(f"[Source: {source} - {chunk_id}]\n{chunk.content}")
         return "\n\n---\n\n".join(parts)
 
-    def _rag_user_message(self, question: str, contexts: list[SourceChunk]) -> str:
-        """Mensaje de usuario con contexto + pregunta (plantilla en app.prompts)."""
-        return build_rag_user_message(self._format_context_block(contexts), question)
+    def _rag_user_message(
+        self, question: str, contexts: list[SourceChunk], channel: GenerateChannel
+    ) -> str:
+        """Mensaje de usuario con contexto + pregunta (plantilla en app.prompts; incluye [CANAL: …])."""
+        return build_rag_user_message(
+            self._format_context_block(contexts), question, channel=channel
+        )
 
     def generate(
         self,
@@ -770,7 +774,7 @@ class RAGService:
             return self._force_markdown_system(s, channel) if markdown_final else s
 
         if not contexts:
-            user_message = build_no_retrieval_user_message(question)
+            user_message = build_no_retrieval_user_message(question, channel=channel)
             message = self.llm.invoke(
                 [
                     {"role": "system", "content": _system_no_retrieval_effective()},
@@ -797,7 +801,7 @@ class RAGService:
                 text = self._llm_message_text(message)
             return text, []
 
-        user_message = self._rag_user_message(question, contexts)
+        user_message = self._rag_user_message(question, contexts, channel)
         message = self.llm.invoke(
             [
                 {"role": "system", "content": _system_rag_effective()},
