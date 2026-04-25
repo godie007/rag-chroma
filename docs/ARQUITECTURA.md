@@ -258,7 +258,7 @@ Definidas en `backend/app/config.py` (Pydantic Settings). Los nombres en **MAYÚ
 | `OPENAI_API_KEY` | `openai_api_key` | `str`, `""` | Obligatoria para RAG: embeddings y chat. Si falta, `_rag` queda en `None`. |
 | `OPENAI_CHAT_MODEL` | `openai_chat_model` | `gpt-4o-mini` | Modelo de chat para respuestas y ramas sin contexto. |
 | `OPENAI_CHAT_TEMPERATURE` | `openai_chat_temperature` | `0.1` | Temperatura del chat RAG (`/chat`); validado entre 0 y 2. |
-| `OPENAI_EMBEDDING_MODEL` | `openai_embedding_model` | `text-embedding-3-small` | Modelo de embeddings para índice y consultas. |
+| `OPENAI_EMBEDDING_MODEL` | `openai_embedding_model` | `text-embedding-3-large` | Modelo de embeddings para índice y consultas. |
 | `OPENAI_EMBEDDING_DIMENSIONS` | `openai_embedding_dimensions` | *vacío* | Dimensiones MRL (p. ej. 1024) con `text-embedding-3-large`; vacío = nativas. Cambiar implica reindexar. |
 | `OPENAI_API_BASE` | `openai_api_base` | `None` | Base URL opcional (Azure OpenAI u otro compatible). |
 | `CHROMA_PERSIST_DIRECTORY` | `chroma_persist_directory` | `./chroma_db` | Carpeta de persistencia Chroma. Las rutas **relativas** se resuelven respecto a **`backend/`**, no al CWD de uvicorn. |

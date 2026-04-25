@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     openai_chat_temperature: float = Field(default=0.1, ge=0.0, le=2.0)
     # Límite de tokens de salida del chat RAG (respuestas largas / prompts detallados).
     openai_chat_max_output_tokens: int = Field(default=2096, ge=256, le=128_000)
-    openai_embedding_model: str = "text-embedding-3-small"
+    openai_embedding_model: str = "text-embedding-3-large"
     # text-embedding-3-* (MRL / Matryoshka): p. ej. 256, 1024 con large; 512 con small. None = nativas del modelo.
     openai_embedding_dimensions: int | None = None
     openai_api_base: str | None = None
