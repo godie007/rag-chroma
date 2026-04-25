@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   chat,
-  getApiBase,
   setChatThreadId,
   type ChatResponse,
-  type ConfigPublic,
   type StatsResponse,
 } from '../api'
 import { IndexFragmentBadge } from '../components/IndexFragmentBadge'
@@ -24,11 +22,9 @@ function timeLabel(): string {
 }
 
 export function ChatView({
-  config,
   stats,
   statsLoading = false,
 }: {
-  config: ConfigPublic | null
   stats: StatsResponse | null
   statsLoading?: boolean
 }) {
@@ -89,22 +85,12 @@ export function ChatView({
     <div className="flex flex-1 flex-col min-h-0">
       <main className="flex-1 overflow-y-auto bg-surface-bright flex flex-col items-center min-h-0">
         <div className="w-full max-w-[44rem] px-6 py-10 md:py-12 space-y-10">
-          <div className="flex items-center justify-center gap-3 flex-wrap">
+          <div className="flex justify-center">
             <IndexFragmentBadge
               stats={stats}
               statsLoading={statsLoading}
               className="px-3 py-1.5 rounded-full bg-surface-container-low border border-outline-variant/15"
             />
-            <button
-              type="button"
-              onClick={onNewConversation}
-              disabled={loading}
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-container-low border border-outline-variant/20 text-xs font-bold text-on-surface-variant hover:bg-surface-container-high transition-colors disabled:opacity-50"
-              title="Limpiar historial del chat y comenzar un nuevo hilo"
-            >
-              <Icon name="add_comment" className="text-sm" />
-              Nueva conversación
-            </button>
           </div>
           {turns.length === 0 && (
             <p className="text-center text-sm text-on-surface-variant">
@@ -246,7 +232,18 @@ export function ChatView({
                 }
               }}
             />
-            <div className="absolute bottom-4 right-4 flex items-center gap-4">
+            <div className="absolute bottom-4 right-4 flex items-center gap-2 md:gap-4">
+              <button
+                type="button"
+                onClick={onNewConversation}
+                disabled={loading}
+                className="inline-flex items-center gap-1.5 px-2.5 md:px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant/20 text-[11px] md:text-xs font-bold text-on-surface-variant hover:bg-surface-container-high transition-colors disabled:opacity-50"
+                title="Limpiar historial del chat y comenzar un nuevo hilo"
+              >
+                <Icon name="add_comment" className="text-sm" />
+                <span className="hidden sm:inline">Nueva conversación</span>
+                <span className="sm:hidden">Nuevo</span>
+              </button>
               <span className="text-[10px] font-bold text-on-surface-variant/40 hidden md:block uppercase tracking-widest">
                 Shift + Enter salto de línea
               </span>
@@ -269,42 +266,6 @@ export function ChatView({
               </button>
             </div>
           </div>
-          <p className="text-[10px] text-center mt-4 text-on-surface-variant/50 font-medium">
-            Comprueba las respuestas con el texto de las fuentes cuando proceda.
-            {config?.rag_clarification_enabled
-              ? ' Si hace falta, el asistente puede pedirte un matiz; el hilo de conversación se mantiene (sessionStorage + thread_id).'
-              : ' Bucle de aclaración desactivado en el servidor (p. ej. RAG_CLARIFICATION_ENABLED=false): responde sin preguntar antes.'}
-            {' '}
-            <span className="text-on-surface-variant/40">/nuevo</span> inicia otra conversación.
-          </p>
-          {config?.whatsapp_webhook_active ? (
-            <div className="text-[10px] text-center mt-2 text-on-surface-variant/60 font-medium max-w-xl mx-auto leading-relaxed space-y-1">
-              {config.whatsapp_polling_active ? (
-                <p>
-                  WhatsApp: polling ({config.whatsapp_poll_mode}) a{' '}
-                  <span className="text-on-surface-variant">{config.whatsapp_api_base_url}</span>
-                  {config.whatsapp_poll_mode === 'chats'
-                    ? ' → /chats + /messages?chat_jid=…'
-                    : ' → /messages/recent'}
-                  {' '}
-                  cada {config.whatsapp_poll_interval_sec}s → RAG →{' '}
-                  <code className="text-[9px] bg-surface-container-high px-1 rounded">POST /send/text</code>{' '}
-                  (API :8090; GOWA :3000).
-                </p>
-              ) : (
-                <p>WhatsApp: sin polling; recepción vía POST al webhook de abajo (API Flask puede reenviar desde GOWA).</p>
-              )}
-              <p>
-                Webhook RAG:{' '}
-                <code className="text-[9px] bg-surface-container-high px-1 rounded break-all">
-                  {getApiBase()}/webhooks/whatsapp
-                </code>
-              </p>
-              <p className="text-[10px] text-on-surface-variant/70">
-                Números permitidos: pestaña <span className="font-semibold text-on-surface-variant">WhatsApp</span>.
-              </p>
-            </div>
-          ) : null}
         </div>
       </footer>
     </div>

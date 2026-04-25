@@ -126,7 +126,7 @@ function App() {
           }
           aria-hidden={view !== 'chat'}
         >
-          <ChatView config={config} stats={stats} statsLoading={statsLoading} />
+          <ChatView stats={stats} statsLoading={statsLoading} />
         </div>
         <div
           className={
