@@ -76,16 +76,35 @@ export function ChatView({
     }
   }, [input, loading])
 
+  const onNewConversation = useCallback(() => {
+    if (loading) return
+    setChatThreadId(null)
+    setTurns([])
+    setInput('')
+    setError(null)
+    setSelection(null)
+  }, [loading])
+
   return (
     <div className="flex flex-1 flex-col min-h-0">
       <main className="flex-1 overflow-y-auto bg-surface-bright flex flex-col items-center min-h-0">
         <div className="w-full max-w-[44rem] px-6 py-10 md:py-12 space-y-10">
-          <div className="flex justify-center">
+          <div className="flex items-center justify-center gap-3 flex-wrap">
             <IndexFragmentBadge
               stats={stats}
               statsLoading={statsLoading}
               className="px-3 py-1.5 rounded-full bg-surface-container-low border border-outline-variant/15"
             />
+            <button
+              type="button"
+              onClick={onNewConversation}
+              disabled={loading}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-container-low border border-outline-variant/20 text-xs font-bold text-on-surface-variant hover:bg-surface-container-high transition-colors disabled:opacity-50"
+              title="Limpiar historial del chat y comenzar un nuevo hilo"
+            >
+              <Icon name="add_comment" className="text-sm" />
+              Nueva conversación
+            </button>
           </div>
           {turns.length === 0 && (
             <p className="text-center text-sm text-on-surface-variant">
