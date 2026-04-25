@@ -254,7 +254,7 @@ export function ChatView({
             Comprueba las respuestas con el texto de las fuentes cuando proceda.
             {config?.rag_clarification_enabled
               ? ' Si hace falta, el asistente puede pedirte un matiz; el hilo de conversación se mantiene (sessionStorage + thread_id).'
-              : null}
+              : ' Bucle de aclaración desactivado en el servidor (p. ej. RAG_CLARIFICATION_ENABLED=false): responde sin preguntar antes.'}
             {' '}
             <span className="text-on-surface-variant/40">/nuevo</span> inicia otra conversación.
           </p>

@@ -48,7 +48,8 @@ class Settings(BaseSettings):
     # Si es False, no se llama al LLM antes de recuperar (siempre perfil "normal"; ahorra coste/latencia).
     llm_retrieval_profile: bool = True
     # Bucle de clarificación (LangGraph): evaluar si el contexto es ambiguo y preguntar al usuario antes de responder.
-    rag_clarification_enabled: bool = False
+    # true por defecto: RAG clásico sin clarificar → RAG_CLARIFICATION_ENABLED=false en .env
+    rag_clarification_enabled: bool = True
     rag_clarification_max_rounds: int = Field(3, ge=0, le=8, description="Máx. preguntas de clarificación por hilo en una cadena")
     # Bucle de clarificación: LLM de expansión semántica antes del primer retrieve (sinónimos / términos normativos).
     rag_clarify_semantic_expand: bool = True
