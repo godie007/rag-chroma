@@ -34,10 +34,20 @@ from app.prompt_store import get_system_no_retrieval_for_channel, get_system_rag
 logger = logging.getLogger(__name__)
 
 GenerateChannel = Literal["web", "whatsapp"]
-_MARKDOWN_OUTPUT_GUARDRAIL = (
-    "FORMATO OBLIGATORIO DE SALIDA: responde siempre en Markdown válido. "
-    "Usa párrafos, listas, tablas o encabezados cuando aporten claridad. "
-    "No respondas en JSON, XML ni texto estructurado de máquina."
+
+# Solo se añade a la respuesta final (markdown_final=True), no al evaluador de ambigüedad.
+_MARKDOWN_OUTPUT_GUARDRAIL_WEB = (
+    "FORMATO OBLIGATORIO DE SALIDA (canal web, se renderiza con Markdown+GFM en el cliente): "
+    "redacta en Markdown claro y profesional. Puedes usar títulos `##` / `###`, **negrita**, listas, "
+    "tablas GFM (|) cuando aporten estructura, y bloques de código con fence cuando proceda. "
+    "Estructura la respuesta: resumen o conclusión al inicio si es técnica larga; secciones breves. "
+    "No devuelvas JSON, XML u otro artefacto de máquina salvo que el usuario pida explícitamente un formato de datos."
+)
+
+_MARKDOWN_OUTPUT_GUARDRAIL_WHATSAPP = (
+    "FORMATO O SALIDA: respeta estrictamente las *REGLAS DE FORMATO WHATSAPP* de tu system prompt "
+    "(*negrita*, _cursiva_, viñetas •, tablas reexpresadas en viñetas; sin Markdown de escritorio prohibido allí). "
+    "No respondas en JSON."
 )
 
 @dataclass
@@ -57,12 +67,13 @@ class SourceChunk:
 
 class RAGService:
     @staticmethod
-    def _force_markdown_system(system_prompt: str) -> str:
-        """Añade una guardrail de formato para que la salida final sea Markdown."""
+    def _force_markdown_system(system_prompt: str, channel: GenerateChannel) -> str:
+        """Añade guardrails de formato en la salida final (web = GFM; WhatsApp = reglas del propio system)."""
         base = (system_prompt or "").strip()
+        extra = _MARKDOWN_OUTPUT_GUARDRAIL_WEB if channel == "web" else _MARKDOWN_OUTPUT_GUARDRAIL_WHATSAPP
         if not base:
-            return _MARKDOWN_OUTPUT_GUARDRAIL
-        return f"{base}\n\n{_MARKDOWN_OUTPUT_GUARDRAIL}"
+            return extra
+        return f"{base}\n\n{extra}"
 
     @staticmethod
     def _looks_like_ambiguity_payload(text: str) -> bool:
@@ -752,11 +763,11 @@ class RAGService:
         """
         def _system_rag_effective() -> str:
             s = get_system_rag_for_channel(channel)
-            return self._force_markdown_system(s) if markdown_final else s
+            return self._force_markdown_system(s, channel) if markdown_final else s
 
         def _system_no_retrieval_effective() -> str:
             s = get_system_no_retrieval_for_channel(channel)
-            return self._force_markdown_system(s) if markdown_final else s
+            return self._force_markdown_system(s, channel) if markdown_final else s
 
         if not contexts:
             user_message = build_no_retrieval_user_message(question)
@@ -773,7 +784,7 @@ class RAGService:
                     channel,
                 )
                 sys_fb = (
-                    self._force_markdown_system(SYSTEM_NO_RETRIEVAL)
+                    self._force_markdown_system(SYSTEM_NO_RETRIEVAL, channel)
                     if markdown_final
                     else SYSTEM_NO_RETRIEVAL
                 )
@@ -799,7 +810,7 @@ class RAGService:
                 "Salida con firma de evaluador en generate(with_context) canal=%s; reintentando con SYSTEM_RAG default.",
                 channel,
             )
-            sys_fb = self._force_markdown_system(SYSTEM_RAG) if markdown_final else SYSTEM_RAG
+            sys_fb = self._force_markdown_system(SYSTEM_RAG, channel) if markdown_final else SYSTEM_RAG
             message = self.llm.invoke(
                 [
                     {"role": "system", "content": sys_fb},
