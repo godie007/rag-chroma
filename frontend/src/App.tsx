@@ -14,26 +14,27 @@ import { ConfigurationsView } from './views/ConfigurationsView'
 import { WhatsAppSettingsView } from './views/WhatsAppSettingsView'
 
 const VIEW_TO_PATH: Record<AppView, string> = {
-  documents: '/documents',
-  chat: '/chat',
-  evaluation: '/evaluation',
-  whatsapp: '/whatsapp',
-  settings: '/settings',
+  documents: '#/documents',
+  chat: '#/chat',
+  evaluation: '#/evaluation',
+  whatsapp: '#/whatsapp',
+  settings: '#/settings',
 }
 
-function pathToView(pathname: string): AppView {
-  const clean = (pathname || '/').replace(/\/+$/, '') || '/'
+function hashToView(rawHash: string): AppView {
+  const clean = (rawHash || '#/documents').replace(/\/+$/, '') || '#/documents'
   switch (clean) {
-    case '/':
-    case '/documents':
+    case '#':
+    case '#/':
+    case '#/documents':
       return 'documents'
-    case '/chat':
+    case '#/chat':
       return 'chat'
-    case '/evaluation':
+    case '#/evaluation':
       return 'evaluation'
-    case '/whatsapp':
+    case '#/whatsapp':
       return 'whatsapp'
-    case '/settings':
+    case '#/settings':
       return 'settings'
     default:
       return 'documents'
@@ -42,7 +43,7 @@ function pathToView(pathname: string): AppView {
 
 function App() {
   const [view, setViewState] = useState<AppView>(() =>
-    typeof window === 'undefined' ? 'documents' : pathToView(window.location.pathname),
+    typeof window === 'undefined' ? 'documents' : hashToView(window.location.hash),
   )
   const [stats, setStats] = useState<StatsResponse | null>(null)
   /** Hasta el primer GET /stats terminado no mostrar "0 fragmentos" como si fuera el total real. */
@@ -98,20 +99,20 @@ function App() {
   }, [refreshStats])
 
   useEffect(() => {
-    const onPopState = () => {
-      setViewState(pathToView(window.location.pathname))
+    const onHashChange = () => {
+      setViewState(hashToView(window.location.hash))
     }
-    window.addEventListener('popstate', onPopState)
-    return () => window.removeEventListener('popstate', onPopState)
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
 
   const setView = useCallback((next: AppView) => {
     setViewState(next)
     if (typeof window === 'undefined') return
-    const targetPath = VIEW_TO_PATH[next] ?? '/documents'
-    const currentPath = window.location.pathname || '/'
-    if (currentPath !== targetPath) {
-      window.history.pushState({ view: next }, '', targetPath)
+    const targetHash = VIEW_TO_PATH[next] ?? '#/documents'
+    const currentHash = window.location.hash || ''
+    if (currentHash !== targetHash) {
+      window.location.hash = targetHash
     }
   }, [])
 
