@@ -21,6 +21,10 @@ const VIEW_TO_PATH: Record<AppView, string> = {
   settings: '#/settings',
 }
 
+function canonicalUrlForView(view: AppView): string {
+  return `/${VIEW_TO_PATH[view] ?? '#/documents'}`
+}
+
 function hashToView(rawHash: string): AppView {
   const clean = (rawHash || '#/documents').replace(/\/+$/, '') || '#/documents'
   switch (clean) {
@@ -43,7 +47,9 @@ function hashToView(rawHash: string): AppView {
 
 function App() {
   const [view, setViewState] = useState<AppView>(() =>
-    typeof window === 'undefined' ? 'documents' : hashToView(window.location.hash),
+    typeof window === 'undefined'
+      ? 'documents'
+      : hashToView(window.location.hash || `#${window.location.pathname}`),
   )
   const [stats, setStats] = useState<StatsResponse | null>(null)
   /** Hasta el primer GET /stats terminado no mostrar "0 fragmentos" como si fuera el total real. */
@@ -106,13 +112,22 @@ function App() {
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const expected = canonicalUrlForView(view)
+    const current = `${window.location.pathname}${window.location.hash || ''}`
+    if (current !== expected) {
+      window.history.replaceState({ view }, '', expected)
+    }
+  }, [view])
+
   const setView = useCallback((next: AppView) => {
     setViewState(next)
     if (typeof window === 'undefined') return
-    const targetHash = VIEW_TO_PATH[next] ?? '#/documents'
-    const currentHash = window.location.hash || ''
-    if (currentHash !== targetHash) {
-      window.location.hash = targetHash
+    const target = canonicalUrlForView(next)
+    const current = `${window.location.pathname}${window.location.hash || ''}`
+    if (current !== target) {
+      window.history.pushState({ view: next }, '', target)
     }
   }, [])
 
