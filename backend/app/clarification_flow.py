@@ -4,6 +4,7 @@ Clarification loop: grafo LangGraph (retrieve → evaluar → clarificar o gener
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from typing import Any, Literal, TypedDict
@@ -32,6 +33,7 @@ class AmbiguityEvaluation(BaseModel):
 
 class _GraphState(TypedDict, total=False):
     query: str
+    original_query: str
     thread_id: str
     expanded_query: str
     channel: str
@@ -159,7 +161,7 @@ def _node_re_refine(rag: RAGService) -> Any:
             return {"re_retrieve_done": True}
         ch2 = rag.retrieve(rq)
         if ch2:
-            return {"chunks": ch2, "query": rq, "re_retrieve_done": True}
+            return {"chunks": ch2, "re_retrieve_done": True}
         return {"re_retrieve_done": True}
 
     return _run
@@ -168,12 +170,23 @@ def _node_re_refine(rag: RAGService) -> Any:
 def _node_answer(rag: RAGService) -> Any:
     async def _run(s: _GraphState) -> dict[str, Any]:
         ch = s.get("chunks") or []
-        q = (s.get("query") or "").strip()
+        q = (s.get("original_query") or s.get("query") or "").strip()
         ch_t = s.get("channel") or "web"
         if ch_t not in ("web", "whatsapp"):
             ch_t = "web"
         channel: GenerateChannel = "whatsapp" if ch_t == "whatsapp" else "web"
         text, used = rag.generate(q, ch, channel=channel)
+        # Salvaguarda: el evaluador devuelve JSON interno; nunca debe mostrarse al usuario final.
+        # Si por error de prompts/ruteo sale un objeto de ambigüedad serializado, regenera respuesta normal.
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict) and "is_ambiguous" in parsed:
+                logger.warning(
+                    "Salida JSON del evaluador detectada en nodo answer; regenerando respuesta final."
+                )
+                text, used = rag.generate(q, ch, channel=channel)
+        except Exception:
+            pass
         return {
             "final_answer": text,
             "used_chunks": used,
@@ -225,6 +238,7 @@ async def run_clarify_turn(
     out: _GraphState = await graph.ainvoke(
         {
             "query": query,
+            "original_query": query,
             "thread_id": thread_id,
             "channel": channel,
             "n_clarif_sent_before": n_clarif_sent_before,
